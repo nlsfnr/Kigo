@@ -10,9 +10,10 @@ from einops import rearrange
 from .configs import ModelConfig, UBlockConfig, Config
 
 
-class SinusoidalEmbedding:
+class SinusoidalEmbedding(hk.Module):
 
-    def __init__(self, width: int) -> None:
+    def __init__(self, width: int, name: Optional[str] = None) -> None:
+        super().__init__(name)
         assert width % 2 == 0, 'Expected even width for timestep embeddings'
         self.width = width
         self.freqs = jnp.logspace(0, 1., width // 2)

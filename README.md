@@ -44,3 +44,8 @@ checkpoints stored inside the working directory, which is `zoo/my-model/` in
 this case. Using symlinks, Kigo will automatically find the latest checkpoint
 inside of a working directory, however, one can sample from a specific
 checkpoint by running e.g. `./cli.py syn zoo/my-model/001000/`.
+
+# Other
+
+This project was implemented using tools from the [DeepMind Jax
+ecosystem](https://www.deepmind.com/blog/using-jax-to-accelerate-our-research).

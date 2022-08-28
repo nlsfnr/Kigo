@@ -1,8 +1,8 @@
 # Since the installation of Jax can sometimes be a bit more involved, it is not
 # listed here. Please install it manually!
 dm-haiku
-chex
 optax
+git+https://github.com/deepmind/jmp  # Mixed precision
 
 einops
 torch       # For Dataset and DataLoader only

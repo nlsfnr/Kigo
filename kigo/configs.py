@@ -36,6 +36,7 @@ class WandBConfig(BaseModel):
 
 
 class TrainingConfig(BaseModel):
+    use_fp16: bool
     # Optimizer
     learning_rate: float
     weight_decay: float

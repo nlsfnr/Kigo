@@ -5,6 +5,7 @@ from itertools import count
 from pprint import pformat
 import haiku as hk
 import optax
+import jmp
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -16,7 +17,8 @@ from .diffusion import sample_q, sample_p, cosine_snr
 from .utils import Directory, get_logger, random_name
 from .configs import Config
 from .data import Dataset
-from .nn import Model, get_params_and_forward_fn
+from .nn import (Model, SinusoidalEmbedding, Attention,
+                 get_params_and_forward_fn)
 from . import persistence
 
 
@@ -67,6 +69,8 @@ def train(params: optax.Params,
           ctx: Context,
           ) -> Iterator[Pack]:
 
+    scale = jmp.DynamicLossScale(jnp.asarray(2 ** 15))
+
     def forward_fn(x0: jnp.ndarray,
                    snr: jnp.ndarray,
                    ) -> jnp.ndarray:
@@ -78,13 +82,30 @@ def train(params: optax.Params,
                 xt: jnp.ndarray,
                 snr: jnp.ndarray,
                 noise: jnp.ndarray,
+                scale_: jmp.LossScale,
                 rng: Any,
-                ) -> jnp.ndarray:
+                ) -> Tuple[jnp.ndarray, Tuple[jnp.ndarray, jmp.LossScale]]:
         noise_pred = forward.apply(params_, rng, xt, snr)
-        return jnp.mean((noise_pred - noise) ** 2)
+        loss = jnp.mean((noise_pred - noise) ** 2)
+        loss_scaled = scale_.scale(loss)
+        return loss_scaled, (loss, scale)
 
-    gradient_fn = jax.value_and_grad(loss_fn)
+    gradient_fn = jax.grad(loss_fn, has_aux=True)
     opt, opt_state = get_opt_and_opt_state(cfg, params, opt_state)
+
+    # Set policies for mixed precision
+    half, full = jnp.float16 if cfg.tr.use_fp16 else jnp.float32, jnp.float32
+    hk.mixed_precision.set_policy(SinusoidalEmbedding,
+                                  jmp.Policy(param_dtype=full,
+                                             compute_dtype=full,
+                                             output_dtype=half))
+    hk.mixed_precision.set_policy(Attention, jmp.Policy(param_dtype=full,
+                                                        compute_dtype=full,
+                                                        output_dtype=half))
+    model_policy = jmp.Policy(param_dtype=full,
+                              compute_dtype=half,
+                              output_dtype=full)
+    hk.mixed_precision.set_policy(Model, model_policy)
 
     @partial(jax.pmap, axis_name='device', donate_argnums=5)
     def train_step(x0: jnp.ndarray,
@@ -92,22 +113,26 @@ def train(params: optax.Params,
                    ema_: optax.Params,
                    opt_state_: optax.MultiStepsState,
                    rng: Any,
+                   scale_: jmp.LossScale,
                    ) -> Tuple[optax.Params, optax.Params, optax.OptState,
-                              jnp.ndarray]:
+                              jmp.LossScale, jnp.ndarray]:
         rng, rng_split = jax.random.split(rng)
         noise = jax.random.normal(rng, shape=x0.shape)
         rng, rng_split = jax.random.split(rng)
         t = jax.random.uniform(rng_split, shape=(len(x0),))
         snr = cosine_snr(t)
         xt = sample_q(x0, noise, snr)
-        loss, gradients = gradient_fn(params_, xt, snr, noise, rng)
+        gradients, (loss, scale_) = gradient_fn(params_, xt, snr, noise,
+                                                scale_, rng)
+        gradients = model_policy.cast_to_compute(gradients)
+        gradients = scale.unscale(gradients)
         gradients = jax.lax.pmean(gradients, axis_name='device')
-        mae = loss ** 0.5
+        gradients = model_policy.cast_to_param(gradients)
         updates, opt_state_ = opt.update(gradients, opt_state_, params=params_)
         params_ = optax.apply_updates(params_, updates)
         ema_ = optax.incremental_update(params_, ema_,
                                         step_size=1. - cfg.tr.ema_alpha)
-        return params_, ema_, opt_state_, mae
+        return params_, ema_, opt_state_, scale_, loss ** 0.5
 
     batch_it = (batch for _ in count()
                 for batch in iter(dataset.dataloader()))
@@ -122,6 +147,7 @@ def train(params: optax.Params,
     p_params = pytree_broadcast(params)
     p_ema = pytree_broadcast(ema)
     p_opt_state = pytree_broadcast(opt_state)
+    p_scale = pytree_broadcast(scale)
     # The inverse of broadcasting the params etc. across devices. This is used
     # when we want to yield the current training state to downstream functions,
     # e.g. autosave.
@@ -133,8 +159,9 @@ def train(params: optax.Params,
             p_batch = rearrange(batch, '(d b) ... -> d b ...',
                                 d=device_count)
             p_rng = jnp.array([next(rngs) for _ in range(device_count)])
-            state = train_step(p_batch, p_params, p_ema, p_opt_state, p_rng)
-            p_params, p_ema, p_opt_state, p_mae = state
+            state = train_step(p_batch, p_params, p_ema, p_opt_state, p_rng,
+                               p_scale)
+            p_params, p_ema, p_opt_state, p_scale, p_mae = state
             maes.append(float(p_mae.mean()))
         ctx.iteration += 1
         if ctx.iteration % cfg.tr.yield_freq == 0:
