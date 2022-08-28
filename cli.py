@@ -38,8 +38,10 @@ def init(workdir: Path, config: File, seed: Optional[int]) -> None:
 
 @cli.command('train')
 @click.argument('checkpoint', type=Directory)
+@click.option('--debug', is_flag=True)
 @click.option('--seed', type=int, default=None)
-def train(checkpoint: Path, seed: Optional[int]) -> None:
+def train(checkpoint: Path, debug: bool, seed: Optional[int]) -> None:
+    jax.config.update('jax_disable_jit', debug)  # type: ignore
     checkpoint = persistence.get_checkpoint(checkpoint)
     rngs = get_rngs(seed)
     cfg = persistence.load_cfg(checkpoint)
@@ -53,8 +55,6 @@ def train(checkpoint: Path, seed: Optional[int]) -> None:
                            ctx)
     packs = training.autosave(packs)
     for pack in packs:
-        if not pack.ctx.periodically(pack.cfg.tr.yield_freq):
-            continue
         logger.info(f'{pack.ctx.iteration} | {pack.mae}')
 
 
