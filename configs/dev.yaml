@@ -11,11 +11,22 @@ tr:
   learning_rate: 0.0002
   weight_decay: 0.0
   gradient_accumulation_steps: 1
-  batch_size: 16
+  batch_size: 32
   ema_alpha: 0.99
   yield_freq: 10
-  save_freq: 100
-  save_checkpoint_freq: 1000
+  save_freq: 1_000
+  save_checkpoint_freq: 10_000
+  wandb:
+    img_freq: 250
+    img_n: 8
+    img_steps: 64
+    img_eta: 0.5
+    img_clip_percentile: 0.995
+    project: 'Kigo-2'
+    group: 'Dev'
+    name: null
+    tags: ['deleteme']
+
 
 model:
   blocks:

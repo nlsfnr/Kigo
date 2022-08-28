@@ -1,24 +1,32 @@
-from typing import Iterator, NamedTuple, Any, Optional, Tuple
+from typing import Iterator, Any, Optional, Tuple
 from dataclasses import dataclass
 from functools import partial
 from itertools import count
+from pprint import pformat
 import haiku as hk
 import optax
 import jax
 import jax.numpy as jnp
+import numpy as np
 from einops import rearrange
+import wandb
+from wandb.sdk.wandb_run import Run as WandbRun
 
-from .diffusion import sample_q, cosine_snr
-from .utils import Directory
+from .diffusion import sample_q, sample_p, cosine_snr
+from .utils import Directory, get_logger, random_name
 from .configs import Config
 from .data import Dataset
-from .nn import Model
+from .nn import Model, get_params_and_forward_fn
 from . import persistence
+
+
+logger = get_logger('kigo.training')
 
 
 @dataclass
 class Context:
     iteration: int = 0
+    wandb_run_id: Optional[str] = None
 
     def periodically(self, freq: int, skip_first: bool = True) -> bool:
         if skip_first and self.iteration == 0:
@@ -36,13 +44,6 @@ class Pack:
     opt_state: optax.OptState
     rngs: hk.PRNGSequence
     mae: float
-
-
-class TrainState(NamedTuple):
-    params: optax.Params
-    ema: optax.Params
-    opt_state: optax.MultiStepsState
-    rng: Any
 
 
 def get_opt_and_opt_state(cfg: Config,
@@ -111,6 +112,7 @@ def train(params: optax.Params,
     batch_it = (batch for _ in count()
                 for batch in iter(dataset.dataloader()))
     device_count = jax.device_count()
+    logger.info(f'Devices found: {device_count}.')
     # Broadcast the params, ema and opt_state to all devices so we can use them
     # inside train_step, which is compiled with jax.pmap. Only the gradients
     # will be shared between each device, minimizing the communication
@@ -168,3 +170,71 @@ def autosave(packs: Iterator[Pack]) -> Iterator[Pack]:
     finally:
         if pack is not None:
             _save_pack(pack.workdir / 'latest', pack)
+
+
+def log(packs: Iterator[Pack]) -> Iterator[Pack]:
+    for pack in packs:
+        logger.info(f'{pack.ctx.iteration:>6}'
+                    f' | MAE: {round(float(pack.mae), 6):>}')
+        yield pack
+
+
+def wandb_log(packs: Iterator[Pack]) -> Iterator[Pack]:
+    run: Optional[WandbRun] = None
+    try:
+        maes = []
+        for pack in packs:
+            maes.append(pack.mae)
+            if run is None:
+                run = _get_wandb_run(pack)
+            maes_: jnp.ndarray = jnp.array(maes)
+            maes.clear()
+            _log_to_wandb(run, pack, jnp.mean(maes_))
+            if pack.ctx.periodically(pack.cfg.tr.wandb_.img_freq):
+                _img_to_wandb(run, pack)
+            yield pack
+    finally:
+        if run is not None:
+            run.finish()
+
+
+def _get_wandb_run(pack: Pack) -> WandbRun:
+    wandb_cfg = pack.cfg.tr.wandb_
+    if pack.ctx.wandb_run_id is None:
+        run = wandb.init(project=wandb_cfg.project,
+                         group=wandb_cfg.group,
+                         name=(wandb_cfg.name
+                               or random_name(prefix='wandb')),
+                         tags=wandb_cfg.tags,
+                         resume=False,
+                         notes=(f'\nConfig:\n{pformat(pack.cfg.dict())}'))
+    else:
+        run = wandb.init(id=pack.ctx.wandb_run_id,
+                         project=wandb_cfg.project,
+                         group=wandb_cfg.group,
+                         tags=wandb_cfg.tags,
+                         resume=True)
+    assert isinstance(run, WandbRun)
+    pack.ctx.wandb_run_id = run.id
+    logger.info(f'Loaded WandB run with id: {run.id}, name: {run.name} and '
+                f'URL: {run.get_url()}')
+    return run
+
+
+def _log_to_wandb(run: WandbRun, pack: Pack, mean_mae: float) -> None:
+    run.log({'MAE': mean_mae}, step=pack.ctx.iteration)
+
+
+def _img_to_wandb(run: WandbRun, pack: Pack) -> None:
+    logger.info('Logging images to WandB...')
+    wandb_cfg = pack.cfg.tr.wandb_
+    n = pack.cfg.tr.wandb_.img_n
+    c, s = pack.cfg.img.channels, pack.cfg.img.size
+    _, forward_fn = get_params_and_forward_fn(pack.cfg, pack.rngs,
+                                              params=pack.ema)
+    xT = jax.random.normal(next(pack.rngs), shape=(n, s, s, c))
+    x0 = sample_p(xT, forward_fn, wandb_cfg.img_steps, next(pack.rngs),
+                  wandb_cfg.img_eta, wandb_cfg.img_clip_percentile)
+    log_dict = {'Samples': [wandb.Image(np.array(img)) for img in x0]}
+    run.log(log_dict, step=pack.ctx.iteration)
+    logger.info('Done')

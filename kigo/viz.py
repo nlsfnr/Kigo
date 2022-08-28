@@ -60,4 +60,4 @@ def make_grid(imgs: IMGLike, n_cols: Optional[int] = None
     cols = [np.pad(col, ((0, h * n_rows - col.shape[0]), (0, 0), (0, 0)))
             for col in cols]
     grid = np.concatenate(cols, axis=1)
-    return grid  # type: ignore
+    return grid

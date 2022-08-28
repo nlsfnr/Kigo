@@ -11,14 +11,13 @@ type-check: $(VENV) $(PY_FILES)
 	$(PYTHON) -m mypy \
 		--install-types \
 		--non-interactive \
-		--strict \
 		--ignore-missing-imports \
 		$(PY_FILES)
 
 .PHONY: lint
 lint: $(VENV) $(PY_FILES)
 	$(PYTHON) -m flake8 $(PY_FILES) \
-		--ignore E402,W503
+		--ignore E402,W503,E731
 
 
 .PHONY: test

@@ -3,3 +3,5 @@
 zoo/
 ddim.png ddpm.png
 *.png
+.global.name_counter
+wandb/

@@ -11,6 +11,7 @@ pyyaml
 tqdm
 click
 matplotlib
+wandb
 
 mypy
 flake8

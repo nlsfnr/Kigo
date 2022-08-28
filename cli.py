@@ -54,8 +54,11 @@ def train(checkpoint: Path, debug: bool, seed: Optional[int]) -> None:
     packs = training.train(params, ema, opt_state, rngs, dataset, workdir, cfg,
                            ctx)
     packs = training.autosave(packs)
+    if cfg.tr.wandb:
+        packs = training.wandb_log(packs)
+    packs = training.log(packs)
     for pack in packs:
-        logger.info(f'{pack.ctx.iteration} | {pack.mae}')
+        del pack
 
 
 @cli.command('syn')

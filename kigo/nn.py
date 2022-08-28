@@ -52,12 +52,12 @@ class Attention(hk.Module):
         q = q * self.scale
         # Match queries to keys
         pattern = "b h d i, b h d j -> b h i j"
-        sim: jnp.ndarray = jnp.einsum(pattern, q, k)  # type: ignore
+        sim: jnp.ndarray = jnp.einsum(pattern, q, k)
         sim = sim - jnp.amax(sim, axis=-1, keepdims=True)
         attn: jnp.ndarray = jax.nn.softmax(sim, axis=-1)
         # Compute the values for each head
         pattern = "b h i j, b h d j -> b h i d"
-        out = jnp.einsum(pattern, attn, v)  # type: ignore
+        out = jnp.einsum(pattern, attn, v)
         out = rearrange(out, "b h (x y) d -> b x y (h d)", x=h, y=w)
         out = self.out_proj(out)
         return out + xt
@@ -137,6 +137,8 @@ class UBlock(hk.Module):
                      self.ub_cfg.dropout)
             for _ in range(self.ub_cfg.blocks)
         ]
+        self.inner_ublock: Optional[UBlock]
+        self.concat_proj: Optional[hk.Conv2D]
         if inner_ub_cfgs:
             self.inner_ublock = UBlock(inner_ub_cfgs, outer_channels=ch)
             self.concat_proj = hk.Conv2D(ch, 1)
@@ -154,7 +156,7 @@ class UBlock(hk.Module):
         self.out_proj = hk.Sequential([
             hk.GroupNorm(self.ub_cfg.groupnorm_groups),
             jax.nn.silu,
-            (hk.Conv2D(outer_channels, 1)
+            (hk.Conv2D(outer_channels, 1)  # type: ignore
              if is_outer else
              hk.Conv2DTranspose(outer_channels, 3, stride=2)),
         ])
@@ -234,8 +236,8 @@ def get_params_and_forward_fn(cfg: Config,
         return model(xt, snr, training)
 
     S, B = cfg.img.size, 1
-    repr_xt = jnp.zeros((B, S, S, cfg.model.input_channels))  # type: ignore
-    repr_t = jnp.zeros((B,))  # type: ignore
+    repr_xt = jnp.zeros((B, S, S, cfg.model.input_channels))
+    repr_t = jnp.zeros((B,))
     model = hk.transform(forward_fn)
     if params is None:
         params = model.init(next(rng_key), repr_xt, repr_t)

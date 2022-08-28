@@ -10,6 +10,15 @@ from .nn import ForwardFn
 NumT = TypeVar('NumT', bound=Union[float, jnp.ndarray])
 
 
+def expand(x: Union[float, jnp.ndarray], ref: jnp.ndarray) -> jnp.ndarray:
+    if isinstance(x, float):
+        x = jnp.array([x] * ref.shape[0])
+    if isinstance(x, jnp.ndarray) and len(x.shape) == 1:
+        x = rearrange(x, 'b -> b 1 1 1')
+    assert isinstance(x, jnp.ndarray)
+    return x
+
+
 def gt0(x: NumT, eps: float = 1e-12) -> NumT:
     '''Ensures that x is greater than zero, i.e. can be safely used as a
     divisor or for sqrts.'''
@@ -18,7 +27,7 @@ def gt0(x: NumT, eps: float = 1e-12) -> NumT:
 
 def cosine_snr(t: Union[float, jnp.ndarray], s: float = 0.008) -> jnp.ndarray:
     '''Signal-to-noise ratio according to a cosine schedule.'''
-    t = jnp.array(t)  # type: ignore
+    t = jnp.array(t)
     t = jnp.clip(t, 0., 1.)
     return jnp.cos((t + s) / (1. + s) * jnp.pi / 2) ** 2
 
@@ -42,7 +51,9 @@ def predict_x0(xt: jnp.ndarray,
     # Dynamic thresholding from Imagen by the Google Brain Team.
     s = jnp.quantile(jnp.abs(x0_hat), clip_percentile, axis=(1, 2, 3),
                      keepdims=True)
-    xt = jnp.where(s > 1., jnp.clip(x0_hat, -s, s) / gt0(s), x0_hat)
+    xt = jnp.where(s > 1.,
+                   jnp.clip(x0_hat, -s, s) / gt0(s),
+                   x0_hat)
     assert isinstance(xt, jnp.ndarray)
     return xt
 
@@ -55,6 +66,9 @@ def sample_p_step(xt: jnp.ndarray,
                   noise: jnp.ndarray,
                   clip_percentile: float = 0.995,
                   ) -> jnp.ndarray:
+    snr = expand(snr, xt)
+    snr_next = expand(snr_next, xt)
+    eta = expand(eta, xt)
     # Eq. 16 in DDIM, we can interpolate between DDPM (when eta = 1) and DDIM
     # (when eta = 0).
     sigma = (eta

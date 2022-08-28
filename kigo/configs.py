@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from pathlib import Path
 import json
 from pydantic import BaseModel
@@ -23,6 +23,18 @@ class ImageConfig(BaseModel):
         return self.size, self.size, self.channels
 
 
+class WandBConfig(BaseModel):
+    img_freq: int
+    img_n: int
+    img_steps: int
+    img_eta: float
+    img_clip_percentile: float
+    project: str
+    group: str
+    name: Optional[str]
+    tags: List[str]
+
+
 class TrainingConfig(BaseModel):
     # Optimizer
     learning_rate: float
@@ -35,6 +47,12 @@ class TrainingConfig(BaseModel):
     yield_freq: int
     save_freq: int
     save_checkpoint_freq: int
+    wandb: Optional[WandBConfig]
+
+    @property
+    def wandb_(self) -> WandBConfig:
+        assert self.wandb is not None, 'Wandb is None, this is a bug :('
+        return self.wandb
 
 
 class UBlockConfig(BaseModel):
