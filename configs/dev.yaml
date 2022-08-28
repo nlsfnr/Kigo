@@ -1,0 +1,45 @@
+ds:
+  path: '../../common/data/ffhq/'
+  extensions: ['.png', '.jpg', '.jpeg', '.webp']
+  loader_worker_count: 6
+
+img:
+  size: 32
+  channels: 3
+
+tr:
+  learning_rate: 0.0002
+  weight_decay: 0.0
+  gradient_accumulation_steps: 1
+  batch_size: 16
+  ema_alpha: 0.99
+  yield_freq: 10
+  save_freq: 100
+  save_checkpoint_freq: 1000
+
+model:
+  blocks:
+    - channels: 64
+      blocks: 2
+      groupnorm_groups: 8
+      attention_heads: 0
+      attention_head_channels: 32
+      dropout: 0.1
+    - channels: 128
+      blocks: 2
+      groupnorm_groups: 8
+      attention_heads: 0
+      attention_head_channels: 32
+      dropout: 0.1
+    - channels: 256
+      blocks: 2
+      groupnorm_groups: 8
+      attention_heads: 4
+      attention_head_channels: 32
+      dropout: 0.1
+  outer_groupnorm_groups: 8
+  outer_channels: 32
+  output_channels: 3
+  input_channels: 3
+  snr_sinusoidal_embedding_width: 32
+  snr_embedding_width: 32

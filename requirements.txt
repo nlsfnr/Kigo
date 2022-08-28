@@ -1,0 +1,17 @@
+# Since the installation of Jax can sometimes be a bit more involved, it is not
+# listed here. Please install it manually!
+dm-haiku
+chex
+optax
+
+einops
+torch       # For Dataset and DataLoader only
+pydantic
+pyyaml
+tqdm
+click
+matplotlib
+
+mypy
+flake8
+pytest
