@@ -1,0 +1,70 @@
+ds:
+  path: './data/ffhq/'
+  extensions: ['.png', '.jpg', '.jpeg', '.webp']
+  loader_worker_count: 10
+
+img:
+  size: 64
+  channels: 3
+
+tr:
+  learning_rate: 0.00012
+  weight_decay: 0.0
+  gradient_accumulation_steps: 1
+  batch_size: 128
+  ema_alpha: 0.999
+  yield_freq: 10
+  save_freq: 1_000
+  save_checkpoint_freq: 50_000
+  wandb:
+    img_freq: 500
+    img_n: 8
+    img_steps: 64
+    img_eta: 0.5
+    img_clip_percentile: 0.995
+    project: 'Kigo-2'
+    group: 'FFHQ'
+    name: 'syn-64x64-200M-A'
+    tags: ['Viking', '64x64']
+
+
+model:
+  outer_groupnorm_groups: 8
+  outer_channels: 192
+  output_channels: 3
+  input_channels: 3
+  snr_sinusoidal_embedding_width: 128
+  snr_embedding_width: 128
+  blocks:
+
+    # Image resolution: 64
+    - channels: 192
+      blocks: 3
+      groupnorm_groups: 8
+      attention_heads: 0
+      attention_head_channels: 0
+      dropout: 0.1
+
+    # Image resolution: 32
+    - channels: 384
+      blocks: 3
+      groupnorm_groups: 8
+      attention_heads: 0
+      attention_head_channels: 0
+      dropout: 0.1
+
+    # Image resolution: 16
+    - channels: 576
+      blocks: 4
+      groupnorm_groups: 8
+      attention_heads: 4
+      attention_head_channels: 128
+      dropout: 0.1
+
+    # Image resolution: 8
+    - channels: 768
+      blocks: 4
+      groupnorm_groups: 8
+      attention_heads: 4
+      attention_head_channels: 128
+      dropout: 0.1

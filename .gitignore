@@ -5,3 +5,4 @@ ddim.png ddpm.png
 *.png
 .global.name_counter
 wandb/
+data
