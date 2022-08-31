@@ -125,9 +125,12 @@ def train(params: optax.Params,
         gradients = model_policy.cast_to_param(gradients)
         gradients_finite = jmp.all_finite(gradients)
         scale_ = scale_.adjust(gradients_finite)
-        updates, opt_state_ = opt.update(gradients, opt_state_, params=params_)
+        updates, new_opt_state = opt.update(gradients, opt_state_,
+                                            params=params_)
         new_params_ = optax.apply_updates(params_, updates)
         params_ = jmp.select_tree(gradients_finite, new_params_, params_)
+        opt_state_ = jmp.select_tree(gradients_finite, new_opt_state,
+                                     opt_state_)
         ema_ = optax.incremental_update(params_, ema_,
                                         step_size=1. - cfg.tr.ema_alpha)
         return params_, ema_, opt_state_, scale_, loss ** 0.5
