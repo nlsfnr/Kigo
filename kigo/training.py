@@ -17,8 +17,7 @@ from .diffusion import sample_q, sample_p, cosine_snr
 from .utils import Directory, get_logger, random_name
 from .configs import Config
 from .data import Dataset
-from .nn import (Model, SinusoidalEmbedding, Attention,
-                 get_params_and_forward_fn)
+from .nn import (Model, SinusoidalEmbedding, get_params_and_forward_fn)
 from . import persistence
 
 
@@ -28,6 +27,7 @@ logger = get_logger('kigo.training')
 @dataclass
 class Context:
     iteration: int = 0
+    loss_scale: int = 2 ** 15
     wandb_run_id: Optional[str] = None
 
     def periodically(self, freq: int, skip_first: bool = True) -> bool:
@@ -46,14 +46,22 @@ class Pack:
     opt_state: optax.OptState
     rngs: hk.PRNGSequence
     mae: float
+    scale: jmp.DynamicLossScale
 
 
 def get_opt_and_opt_state(cfg: Config,
                           params: optax.Params,
                           opt_state: Optional[optax.OptState] = None,
                           ) -> Tuple[optax.MultiSteps, optax.OptState]:
-    opt = optax.adamw(learning_rate=cfg.tr.learning_rate,
-                      weight_decay=cfg.tr.weight_decay)
+
+    def lr_schedule(step: jnp.ndarray) -> jnp.ndarray:
+        return jnp.minimum(1., step / cfg.tr.learning_rate_warmup_steps)
+
+    opt = optax.chain(
+        optax.adamw(learning_rate=cfg.tr.learning_rate,
+                    weight_decay=cfg.tr.weight_decay),
+        optax.scale_by_schedule(lr_schedule),
+    )
     ms_opt = optax.MultiSteps(opt, cfg.tr.gradient_accumulation_steps)
     opt_state = ms_opt.init(params) if opt_state is None else opt_state
     return ms_opt, opt_state
@@ -69,7 +77,8 @@ def train(params: optax.Params,
           ctx: Context,
           ) -> Iterator[Pack]:
 
-    scale = jmp.DynamicLossScale(jnp.asarray(2 ** 15))
+    scale = jmp.DynamicLossScale(jnp.asarray(ctx.loss_scale),
+                                 period=cfg.tr.dynamic_loss_period)
 
     def forward_fn(x0: jnp.ndarray,
                    snr: jnp.ndarray,
@@ -92,20 +101,7 @@ def train(params: optax.Params,
 
     gradient_fn = jax.grad(loss_fn, has_aux=True)
     opt, opt_state = get_opt_and_opt_state(cfg, params, opt_state)
-
-    # Set policies for mixed precision
-    half, full = jnp.float16 if cfg.tr.use_fp16 else jnp.float32, jnp.float32
-    hk.mixed_precision.set_policy(SinusoidalEmbedding,
-                                  jmp.Policy(param_dtype=full,
-                                             compute_dtype=full,
-                                             output_dtype=half))
-    hk.mixed_precision.set_policy(Attention, jmp.Policy(param_dtype=full,
-                                                        compute_dtype=full,
-                                                        output_dtype=half))
-    model_policy = jmp.Policy(param_dtype=full,
-                              compute_dtype=half,
-                              output_dtype=full)
-    hk.mixed_precision.set_policy(Model, model_policy)
+    model_policy = set_mixed_precision_policies(cfg.tr.use_fp16)
 
     @partial(jax.pmap, axis_name='device', donate_argnums=5)
     def train_step(x0: jnp.ndarray,
@@ -119,17 +115,19 @@ def train(params: optax.Params,
         rng, rng_split = jax.random.split(rng)
         noise = jax.random.normal(rng, shape=x0.shape)
         rng, rng_split = jax.random.split(rng)
-        t = jax.random.uniform(rng_split, shape=(len(x0),))
-        snr = cosine_snr(t)
+        snr = cosine_snr(jax.random.uniform(rng_split, shape=(len(x0),)))
         xt = sample_q(x0, noise, snr)
         gradients, (loss, scale_) = gradient_fn(params_, xt, snr, noise,
                                                 scale_, rng)
         gradients = model_policy.cast_to_compute(gradients)
-        gradients = scale.unscale(gradients)
+        gradients = scale_.unscale(gradients)
         gradients = jax.lax.pmean(gradients, axis_name='device')
         gradients = model_policy.cast_to_param(gradients)
+        gradients_finite = jmp.all_finite(gradients)
+        scale_ = scale_.adjust(gradients_finite)
         updates, opt_state_ = opt.update(gradients, opt_state_, params=params_)
-        params_ = optax.apply_updates(params_, updates)
+        new_params_ = optax.apply_updates(params_, updates)
+        params_ = jmp.select_tree(gradients_finite, new_params_, params_)
         ema_ = optax.incremental_update(params_, ema_,
                                         step_size=1. - cfg.tr.ema_alpha)
         return params_, ema_, opt_state_, scale_, loss ** 0.5
@@ -164,6 +162,8 @@ def train(params: optax.Params,
             p_params, p_ema, p_opt_state, p_scale, p_mae = state
             maes.append(float(p_mae.mean()))
         ctx.iteration += 1
+        scale = pytree_collapse(p_scale)
+        ctx.loss_scale = int(scale.loss_scale)
         if ctx.iteration % cfg.tr.yield_freq == 0:
             yield Pack(workdir=workdir,
                        cfg=cfg,
@@ -172,7 +172,21 @@ def train(params: optax.Params,
                        ema=pytree_collapse(p_ema),
                        opt_state=pytree_collapse(p_opt_state),
                        rngs=rngs,
-                       mae=jnp.mean(jnp.array(maes)))
+                       mae=jnp.mean(jnp.array(maes)),
+                       scale=scale)
+
+
+def set_mixed_precision_policies(use_fp16: bool) -> jmp.Policy:
+    half, full = jnp.float16 if use_fp16 else jnp.float32, jnp.float32
+    sin_emb_policy = jmp.Policy(param_dtype=full,
+                                compute_dtype=full,
+                                output_dtype=half)
+    model_policy = jmp.Policy(param_dtype=full,
+                              compute_dtype=half,
+                              output_dtype=full)
+    hk.mixed_precision.set_policy(SinusoidalEmbedding, sin_emb_policy)
+    hk.mixed_precision.set_policy(Model, model_policy)
+    return model_policy
 
 
 def autosave(packs: Iterator[Pack]) -> Iterator[Pack]:
@@ -249,7 +263,8 @@ def _get_wandb_run(pack: Pack) -> WandbRun:
 
 
 def _log_to_wandb(run: WandbRun, pack: Pack, mean_mae: float) -> None:
-    run.log({'MAE': mean_mae}, step=pack.ctx.iteration)
+    d = {'MAE': mean_mae, 'Loss-Scale': float(pack.scale.loss_scale)}
+    run.log(d, step=pack.ctx.iteration)
 
 
 def _img_to_wandb(run: WandbRun, pack: Pack) -> None:

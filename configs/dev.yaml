@@ -1,5 +1,5 @@
 ds:
-  path: '../../common/data/ffhq/'
+  path: './data/birds'
   extensions: ['.png', '.jpg', '.jpeg', '.webp']
   loader_worker_count: 6
 
@@ -9,7 +9,9 @@ img:
 
 tr:
   use_fp16: true
+  dynamic_loss_period: 500
   learning_rate: 0.0002
+  learning_rate_warmup_steps: 500
   weight_decay: 0.0
   gradient_accumulation_steps: 1
   batch_size: 32

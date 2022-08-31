@@ -51,8 +51,8 @@ def train(checkpoint: Path, debug: bool, seed: Optional[int]) -> None:
     dataset = data.Dataset.from_cfg(cfg)
     workdir = persistence.get_workdir(checkpoint)
     ctx = persistence.load_ctx(checkpoint)
-    packs = training.train(params, ema, opt_state, rngs, dataset, workdir, cfg,
-                           ctx)
+    packs = training.train(params, ema, opt_state, rngs, dataset, workdir,
+                           cfg, ctx)
     packs = training.autosave(packs)
     if cfg.tr.wandb:
         packs = training.wandb_log(packs)

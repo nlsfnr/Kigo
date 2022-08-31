@@ -76,7 +76,6 @@ class Dataset(PTDataset[ArrF32]):
         return NumpyDataLoader(self,
                                batch_size=self.cfg.tr.batch_size,
                                shuffle=True,
-                               pin_memory=True,
                                drop_last=True,
                                num_workers=self.cfg.ds.loader_worker_count)
 

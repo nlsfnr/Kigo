@@ -22,7 +22,7 @@ lint: $(VENV) $(PY_FILES)
 
 .PHONY: test
 test: $(VENV) $(PY_FILES)
-	$(PYTHON) -m pytest
+	$(PYTHON) -m pytest ./tests/
 
 .PHONY: py-deps
 py-deps: $(PIP_FREEZE)

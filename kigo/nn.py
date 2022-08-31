@@ -23,6 +23,18 @@ class SinusoidalEmbedding(hk.Module):
         return jnp.concatenate([jnp.sin(xs), jnp.cos(xs)], axis=-1)
 
 
+def fp32(fn: Callable[[jnp.ndarray], jnp.ndarray]
+         ) -> Callable[[jnp.ndarray], jnp.ndarray]:
+
+    def inner(x: jnp.ndarray) -> jnp.ndarray:
+        return fn(x.astype(jnp.float32)).astype(x.dtype)
+
+    return inner
+
+
+silu = fp32(jax.nn.silu)
+
+
 class Attention(hk.Module):
 
     def __init__(self,
@@ -36,7 +48,7 @@ class Attention(hk.Module):
         self.scale = head_channels ** -0.5
         hidden_channels = head_channels * heads
         self.heads = heads
-        self.norm = hk.GroupNorm(groupnorm_groups)
+        self.norm = fp32(hk.GroupNorm(groupnorm_groups))
         self.to_qkv = hk.Conv2D(hidden_channels * 3, 1, with_bias=False)
         self.out_proj = hk.Conv2D(channels, 1,
                                   w_init=hk.initializers.Constant(0.),
@@ -45,7 +57,7 @@ class Attention(hk.Module):
     def __call__(self, xt: jnp.ndarray) -> jnp.ndarray:
         _, h, w, _ = xt.shape
         xt_norm = self.norm(xt)
-        xt_norm = jax.nn.silu(xt_norm)
+        xt_norm = silu(xt_norm)
         # Compute queries, keys and values
         qkv = jnp.split(self.to_qkv(xt_norm), 3, axis=-1)
         q, k, v = [rearrange(arr, "b x y (h c) -> b h c (x y)", h=self.heads)
@@ -55,7 +67,7 @@ class Attention(hk.Module):
         pattern = "b h d i, b h d j -> b h i j"
         sim: jnp.ndarray = jnp.einsum(pattern, q, k)
         sim = sim - jnp.amax(sim, axis=-1, keepdims=True)
-        attn: jnp.ndarray = jax.nn.softmax(sim, axis=-1)
+        attn: jnp.ndarray = fp32(jax.nn.softmax)(sim)
         # Compute the values for each head
         pattern = "b h i j, b h d j -> b h i d"
         out = jnp.einsum(pattern, attn, v)
@@ -76,9 +88,9 @@ class ResBlock(hk.Module):
                  ) -> None:
         super().__init__(name)
         self.dropout = dropout
-        self.norm_1 = hk.GroupNorm(groupnorm_groups)
+        self.norm_1 = fp32(hk.GroupNorm(groupnorm_groups))
         self.conv_1 = hk.Conv2D(channels, 3)
-        self.norm_2 = hk.GroupNorm(groupnorm_groups)
+        self.norm_2 = fp32(hk.GroupNorm(groupnorm_groups))
         self.affine = hk.Linear(channels * 2,
                                 w_init=hk.initializers.Constant(0.),
                                 b_init=hk.initializers.Constant(0.))
@@ -94,7 +106,7 @@ class ResBlock(hk.Module):
     def __call__(self, xt: jnp.ndarray, snr_emb: jnp.ndarray, training: bool
                  ) -> jnp.ndarray:
         h = self.norm_1(xt)
-        h = jax.nn.silu(h)
+        h = silu(h)
         h = self.conv_1(h)
         h = self.norm_2(h)
         wb = self.affine(snr_emb)
@@ -104,7 +116,7 @@ class ResBlock(hk.Module):
         h = h * (1. + w) + b
         if training:
             h = hk.dropout(hk.next_rng_key(), self.dropout, h)
-        h = jax.nn.silu(h)
+        h = silu(h)
         h = self.conv_2(h)
         h = h + self.residual_conv(xt)
         if self.attention is not None:
@@ -125,7 +137,7 @@ class UBlock(hk.Module):
         ch = self.ub_cfg.channels
         self.in_proj = hk.Sequential([
             hk.GroupNorm(self.ub_cfg.groupnorm_groups),
-            jax.nn.silu,
+            silu,
             (hk.Conv2D(ch, 1)
              if is_outer else
              hk.Conv2D(ch, 3, stride=2)),
@@ -156,7 +168,7 @@ class UBlock(hk.Module):
         ]
         self.out_proj = hk.Sequential([
             hk.GroupNorm(self.ub_cfg.groupnorm_groups),
-            jax.nn.silu,
+            silu,
             (hk.Conv2D(outer_channels, 1)  # type: ignore
              if is_outer else
              hk.Conv2DTranspose(outer_channels, 3, stride=2)),
@@ -195,16 +207,16 @@ class Model(hk.Module):
                              is_outer=True)
         self.out_proj = hk.Sequential([
             hk.GroupNorm(self.model_cfg.outer_groupnorm_groups),
-            jax.nn.silu,
+            silu,
             hk.Conv2D(self.model_cfg.output_channels, 3,
                       w_init=hk.initializers.Constant(0.),
                       b_init=hk.initializers.Constant(0.)),
         ])
         self.snr_mlp = hk.Sequential([
             SinusoidalEmbedding(self.model_cfg.snr_sinusoidal_embedding_width),
-            jax.nn.silu,
+            silu,
             hk.Linear(self.model_cfg.snr_embedding_width),
-            jax.nn.silu,
+            silu,
         ])
 
     @classmethod
