@@ -41,23 +41,6 @@ def sample_q(x0: jnp.ndarray,
     return gt0(snr) ** 0.5 * x0 + gt0(1. - snr) ** 0.5 * noise
 
 
-def predict_x0(xt: jnp.ndarray,
-               noise_pred: jnp.ndarray,
-               snr: Union[float, jnp.ndarray],
-               clip_percentile: float = 0.995,
-               ) -> jnp.ndarray:
-    # Eq. 9 in DDIM
-    x0_hat = (xt - gt0(1. - snr) ** 0.5 * noise_pred) / gt0(snr ** 0.5)
-    # Dynamic thresholding from Imagen by the Google Brain Team.
-    s = jnp.quantile(jnp.abs(x0_hat), clip_percentile, axis=(1, 2, 3),
-                     keepdims=True)
-    xt = jnp.where(s > 1.,
-                   jnp.clip(x0_hat, -s, s) / gt0(s),
-                   x0_hat)
-    assert isinstance(xt, jnp.ndarray)
-    return xt
-
-
 def sample_p_step(xt: jnp.ndarray,
                   noise_pred: jnp.ndarray,
                   snr: Union[float, jnp.ndarray],
@@ -74,8 +57,15 @@ def sample_p_step(xt: jnp.ndarray,
     sigma = (eta
              * gt0((1 - snr_next) / gt0(1 - snr)) ** 0.5
              * gt0((1 - snr) / gt0(snr_next)) ** 0.5)
+    # Eq. 9 in DDIM
+    x0_hat = (xt - gt0(1. - snr) ** 0.5 * noise_pred) / gt0(snr ** 0.5)
+    # Dynamic thresholding from Imagen by the Google Brain Team.
+    s = jnp.quantile(jnp.abs(x0_hat), clip_percentile, axis=(1, 2, 3),
+                     keepdims=True)
+    xt = jnp.where(s > 1.,
+                   jnp.clip(x0_hat, -s, s) / gt0(s),
+                   x0_hat)
     # Eq. 12 in DDIM
-    x0_hat = predict_x0(xt, noise_pred, snr, clip_percentile)
     xt = (x0_hat * gt0(snr_next) ** 0.5
           + noise_pred * gt0(1. - snr_next - sigma ** 2) ** 0.5
           + noise * sigma)

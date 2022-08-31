@@ -27,6 +27,8 @@ logger = get_logger('kigo.training')
 @dataclass
 class Context:
     iteration: int = 0
+    # 2 ** 15 should be reasonable, see:
+    # https://docs.nvidia.com/deeplearning/performance/mixed-precision-training/#training
     loss_scale: int = 2 ** 15
     wandb_run_id: Optional[str] = None
 
