@@ -103,9 +103,9 @@ def train(params: optax.Params,
 
     gradient_fn = jax.grad(loss_fn, has_aux=True)
     opt, opt_state = get_opt_and_opt_state(cfg, params, opt_state)
-    model_policy = set_mixed_precision_policies(cfg.tr.use_fp16)
+    set_mixed_precision_policies(cfg.tr.use_fp16)
 
-    @partial(jax.pmap, axis_name='device', donate_argnums=5)
+    @partial(jax.pmap, axis_name='device', donate_argnums=6)
     def train_step(x0: jnp.ndarray,
                    params_: optax.Params,
                    ema_: optax.Params,
@@ -117,24 +117,34 @@ def train(params: optax.Params,
         rng, rng_split = jax.random.split(rng)
         noise = jax.random.normal(rng, shape=x0.shape)
         rng, rng_split = jax.random.split(rng)
+        # Randomly sample from the SNR schedule
         snr = cosine_snr(jax.random.uniform(rng_split, shape=(len(x0),)))
+        # Compute the noisy training sample
         xt = sample_q(x0, noise, snr)
+        # Compute the gradients on each device
         gradients, (loss, scale_) = gradient_fn(params_, xt, snr, noise,
                                                 scale_, rng)
-        gradients = model_policy.cast_to_compute(gradients)
-        gradients = scale_.unscale(gradients)
+        # Take the mean of all gradients, across all devices
         gradients = jax.lax.pmean(gradients, axis_name='device')
-        gradients = model_policy.cast_to_param(gradients)
+        # Undo the scaling needed for mixed precision
+        gradients = scale_.unscale(gradients)
+        # Check if the scaling resulted in NaNs
         gradients_finite = jmp.all_finite(gradients)
+        # Update the scale accordingly
         scale_ = scale_.adjust(gradients_finite)
+        # Compute the parameter updates and new optimizer state
         updates, new_opt_state = opt.update(gradients, opt_state_,
                                             params=params_)
+        # Apply the updates to the parameters
         new_params_ = optax.apply_updates(params_, updates)
-        params_ = jmp.select_tree(gradients_finite, new_params_, params_)
-        opt_state_ = jmp.select_tree(gradients_finite, new_opt_state,
-                                     opt_state_)
-        ema_ = optax.incremental_update(params_, ema_,
-                                        step_size=1. - cfg.tr.ema_alpha)
+        # Update the EMA of the parameters
+        new_ema_ = optax.incremental_update(params_, ema_,
+                                            step_size=1. - cfg.tr.ema_alpha)
+        # Only keep the updates if the gradients did not contain NaNs
+        params_, ema_, opt_state_ = jmp.select_tree(
+                gradients_finite,
+                (new_params_, new_ema_, new_opt_state),
+                (params_, ema_, opt_state_))
         return params_, ema_, opt_state_, scale_, loss ** 0.5
 
     batch_it = (batch for _ in count()
