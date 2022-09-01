@@ -13,6 +13,7 @@ tr:
   learning_rate: 0.00012
   learning_rate_warmup_steps: 1000
   weight_decay: 0.0
+  gradient_clipping: 1.0
   gradient_accumulation_steps: 1
   batch_size: 128
   ema_alpha: 0.999

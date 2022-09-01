@@ -60,6 +60,7 @@ def get_opt_and_opt_state(cfg: Config,
         return jnp.minimum(1., step / cfg.tr.learning_rate_warmup_steps)
 
     opt = optax.chain(
+        optax.clip(cfg.tr.gradient_clipping),
         optax.adamw(learning_rate=cfg.tr.learning_rate,
                     weight_decay=cfg.tr.weight_decay),
         optax.scale_by_schedule(lr_schedule),

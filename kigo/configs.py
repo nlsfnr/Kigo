@@ -43,6 +43,7 @@ class TrainingConfig(BaseModel):
     learning_rate_warmup_steps: int
     weight_decay: float
     gradient_accumulation_steps: int
+    gradient_clipping: float
     # Batches
     batch_size: int
     ema_alpha: float
