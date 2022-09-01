@@ -9,6 +9,7 @@ img:
 
 tr:
   use_fp16: true
+  loss_scale: 1024
   dynamic_loss_period: 1000
   learning_rate: 0.00012
   learning_rate_warmup_steps: 1000

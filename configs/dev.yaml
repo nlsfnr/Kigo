@@ -4,11 +4,12 @@ ds:
   loader_worker_count: 6
 
 img:
-  size: 64
+  size: 32
   channels: 3
 
 tr:
   use_fp16: true
+  loss_scale: 1024
   dynamic_loss_period: 500
   learning_rate: 0.0002
   learning_rate_warmup_steps: 500
@@ -51,12 +52,6 @@ model:
       groupnorm_groups: 8
       attention_heads: 0
       attention_head_channels: 0
-      dropout: 0.1
-    - channels: 256
-      blocks: 2
-      groupnorm_groups: 8
-      attention_heads: 4
-      attention_head_channels: 32
       dropout: 0.1
   outer_groupnorm_groups: 8
   outer_channels: 32

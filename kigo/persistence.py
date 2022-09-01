@@ -100,7 +100,7 @@ def init_workdir(workdir: Path, config_file: File, rng_key: hk.PRNGSequence
     cfg = Config.from_yaml(config_file)
     params, _ = get_params_and_forward_fn(cfg, rng_key)
     _, opt_state = training.get_opt_and_opt_state(cfg, params)
-    ctx = training.Context()
+    ctx = training.Context.from_cfg(cfg)
     save(workdir / INITIAL_CHECKPOINT_NAME,
          params=params,
          ema=params,

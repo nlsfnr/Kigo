@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Iterator, Any, Optional, Tuple
 from dataclasses import dataclass
 from functools import partial
@@ -26,16 +27,18 @@ logger = get_logger('kigo.training')
 
 @dataclass
 class Context:
+    loss_scale: int
     iteration: int = 0
-    # 2 ** 15 should be reasonable, see:
-    # https://docs.nvidia.com/deeplearning/performance/mixed-precision-training/#training
-    loss_scale: int = 2 ** 14
     wandb_run_id: Optional[str] = None
 
     def periodically(self, freq: int, skip_first: bool = True) -> bool:
         if skip_first and self.iteration == 0:
             return False
         return self.iteration % freq == 0
+
+    @classmethod
+    def from_cfg(cls, cfg: Config) -> Context:
+        return cls(loss_scale=cfg.tr.loss_scale)
 
 
 @dataclass
@@ -133,19 +136,28 @@ def train(params: optax.Params,
         gradients_finite = jmp.all_finite(gradients)
         # Update the scale accordingly
         scale_ = scale_.adjust(gradients_finite)
-        # Compute the parameter updates and new optimizer state
-        updates, new_opt_state = opt.update(gradients, opt_state_,
-                                            params=params_)
-        # Apply the updates to the parameters
-        new_params_ = optax.apply_updates(params_, updates)
-        # Update the EMA of the parameters
-        new_ema_ = optax.incremental_update(params_, ema_,
-                                            step_size=1. - cfg.tr.ema_alpha)
-        # Only keep the updates if the gradients did not contain NaNs
-        params_, ema_, opt_state_ = jmp.select_tree(
-                gradients_finite,
-                (new_params_, new_ema_, new_opt_state),
-                (params_, ema_, opt_state_))
+
+        def on_gradients_finite(_: Any) -> Tuple[optax.Params,
+                                                 optax.Params,
+                                                 optax.MultiStepsState]:
+            # Compute the parameter updates and new optimizer state
+            updates, new_opt_state = opt.update(gradients, opt_state_,
+                                                params=params_)
+            # Apply the updates to the parameters
+            new_params_ = optax.apply_updates(params_, updates)
+            # Update the EMA of the parameters
+            new_ema_ = optax.incremental_update(
+                params_, ema_, step_size=1. - cfg.tr.ema_alpha)
+            return new_params_, new_ema_, new_opt_state
+
+        def on_gradients_infinite(_: Any) -> Tuple[optax.Params,
+                                                   optax.Params,
+                                                   optax.MultiStepsState]:
+            return params_, ema_, opt_state_
+
+        params_, ema_, opt_state_ = jax.lax.cond(gradients_finite,
+                                                 (), on_gradients_finite,
+                                                 (), on_gradients_infinite)
         return params_, ema_, opt_state_, scale_, loss ** 0.5
 
     batch_it = (batch for _ in count()
