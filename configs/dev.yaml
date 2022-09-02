@@ -21,6 +21,7 @@ tr:
   yield_freq: 10
   save_freq: 1_000
   save_checkpoint_freq: 10_000
+  check_sync_freq: 1_000
   wandb:
     img_freq: 250
     img_n: 8

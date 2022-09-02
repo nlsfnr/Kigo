@@ -52,6 +52,7 @@ class TrainingConfig(BaseModel):
     yield_freq: int
     save_freq: int
     save_checkpoint_freq: int
+    check_sync_freq: int
     wandb: Optional[WandBConfig]
 
     @property

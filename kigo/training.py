@@ -84,9 +84,6 @@ def train(params: optax.Params,
           ctx: Context,
           ) -> Iterator[Pack]:
 
-    scale = jmp.DynamicLossScale(jnp.asarray(ctx.loss_scale),
-                                 period=cfg.tr.dynamic_scale_period)
-
     def forward_fn(x0: jnp.ndarray,
                    snr: jnp.ndarray,
                    ) -> jnp.ndarray:
@@ -104,7 +101,7 @@ def train(params: optax.Params,
         noise_pred = forward.apply(params_, rng, xt, snr)
         loss = jnp.mean((noise_pred - noise) ** 2)
         loss_scaled = scale_.scale(loss)
-        return loss_scaled, (loss, scale)
+        return loss_scaled, loss
 
     gradient_fn = jax.grad(loss_fn, has_aux=True)
     opt, opt_state = get_opt_and_opt_state(cfg, params, opt_state)
@@ -127,8 +124,7 @@ def train(params: optax.Params,
         # Compute the noisy training sample
         xt = sample_q(x0, noise, snr)
         # Compute the gradients on each device
-        gradients, (loss, scale_) = gradient_fn(params_, xt, snr, noise,
-                                                scale_, rng)
+        gradients, loss = gradient_fn(params_, xt, snr, noise, scale_, rng)
         # Take the mean of all gradients, across all devices
         gradients = jax.lax.pmean(gradients, axis_name='device')
         # Undo the scaling needed for mixed precision
@@ -183,32 +179,31 @@ def train(params: optax.Params,
     p_params = pytree_broadcast(params)
     p_ema = pytree_broadcast(ema)
     p_opt_state = pytree_broadcast(opt_state)
-    p_scale = pytree_broadcast(scale)
+    p_scale = pytree_broadcast(jmp.DynamicLossScale(
+        jnp.asarray(ctx.loss_scale), period=cfg.tr.dynamic_scale_period))
     maes = []
     while True:
         for _ in range(cfg.tr.gradient_accumulation_steps):
-            batch = next(batch_it)
-            p_batch = rearrange(batch, '(d b) ... -> d b ...',
+            p_batch = rearrange(next(batch_it), '(d b) ... -> d b ...',
                                 d=device_count)
             p_rng = jnp.array([next(rngs) for _ in range(device_count)])
             state = train_step(p_batch, p_params, p_ema, p_opt_state, p_rng,
                                p_scale)
             p_params, p_ema, p_opt_state, p_scale, p_mae = state
             maes.append(float(p_mae.mean()))
-        ctx.iteration += 1
-        # Yield the state to downstream tasks.
-        scale = pytree_collapse(p_scale)
-        ctx.loss_scale = int(scale.loss_scale)
-        if ctx.iteration % cfg.tr.yield_freq == 0:
+        if ctx.periodically(cfg.tr.check_sync_freq):
+            chex.assert_trees_all_equal(*pytree_invert(p_params))
+            chex.assert_trees_all_equal(*pytree_invert(p_ema))
+            chex.assert_trees_all_equal(*pytree_invert(p_opt_state))
+            chex.assert_trees_all_equal(*pytree_invert(p_scale))
+        if ctx.periodically(cfg.tr.yield_freq):
             chex.assert_tree_all_finite(p_params)
             chex.assert_tree_all_finite(p_ema)
             chex.assert_tree_all_finite(p_opt_state)
             chex.assert_tree_all_finite(p_scale)
-            if device_count > 1:
-                chex.assert_trees_all_equal(*pytree_invert(p_params))
-                chex.assert_trees_all_equal(*pytree_invert(p_ema))
-                chex.assert_trees_all_equal(*pytree_invert(p_opt_state))
-                chex.assert_trees_all_equal(*pytree_invert(p_scale))
+            # Yield the state to downstream tasks.
+            scale = pytree_collapse(p_scale)
+            ctx.loss_scale = int(scale.loss_scale)
             yield Pack(workdir=workdir,
                        cfg=cfg,
                        ctx=ctx,
@@ -219,6 +214,7 @@ def train(params: optax.Params,
                        mae=jnp.mean(jnp.array(maes)),
                        scale=scale)
             maes.clear()
+        ctx.iteration += 1
 
 
 def set_mixed_precision_policies(use_fp16: bool) -> jmp.Policy:
