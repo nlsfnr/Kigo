@@ -192,15 +192,16 @@ def train(params: optax.Params,
             p_params, p_ema, p_opt_state, p_scale, p_mae = state
             maes.append(float(p_mae.mean()))
         if ctx.periodically(cfg.tr.check_sync_freq):
-            chex.assert_trees_all_equal(*pytree_invert(p_params))
-            chex.assert_trees_all_equal(*pytree_invert(p_ema))
-            chex.assert_trees_all_equal(*pytree_invert(p_opt_state))
-            chex.assert_trees_all_equal(*pytree_invert(p_scale))
-        if ctx.periodically(cfg.tr.yield_freq):
+            if device_count > 1:
+                chex.assert_trees_all_equal(*pytree_invert(p_params))
+                chex.assert_trees_all_equal(*pytree_invert(p_ema))
+                chex.assert_trees_all_equal(*pytree_invert(p_opt_state))
+                chex.assert_trees_all_equal(*pytree_invert(p_scale))
             chex.assert_tree_all_finite(p_params)
             chex.assert_tree_all_finite(p_ema)
             chex.assert_tree_all_finite(p_opt_state)
             chex.assert_tree_all_finite(p_scale)
+        if ctx.periodically(cfg.tr.yield_freq):
             # Yield the state to downstream tasks.
             scale = pytree_collapse(p_scale)
             ctx.loss_scale = int(scale.loss_scale)
