@@ -184,8 +184,8 @@ def train(params: optax.Params,
     p_ema = pytree_broadcast(ema)
     p_opt_state = pytree_broadcast(opt_state)
     p_scale = pytree_broadcast(scale)
+    maes = []
     while True:
-        maes = []
         for _ in range(cfg.tr.gradient_accumulation_steps):
             batch = next(batch_it)
             p_batch = rearrange(batch, '(d b) ... -> d b ...',
@@ -195,20 +195,20 @@ def train(params: optax.Params,
                                p_scale)
             p_params, p_ema, p_opt_state, p_scale, p_mae = state
             maes.append(float(p_mae.mean()))
-        chex.assert_tree_all_finite(p_params)
-        chex.assert_tree_all_finite(p_ema)
-        chex.assert_tree_all_finite(p_opt_state)
-        chex.assert_tree_all_finite(p_scale)
-        if device_count > 1:
-            chex.assert_trees_all_equal(*pytree_invert(p_params))
-            chex.assert_trees_all_equal(*pytree_invert(p_ema))
-            chex.assert_trees_all_equal(*pytree_invert(p_opt_state))
-            chex.assert_trees_all_equal(*pytree_invert(p_scale))
         ctx.iteration += 1
         # Yield the state to downstream tasks.
         scale = pytree_collapse(p_scale)
         ctx.loss_scale = int(scale.loss_scale)
         if ctx.iteration % cfg.tr.yield_freq == 0:
+            chex.assert_tree_all_finite(p_params)
+            chex.assert_tree_all_finite(p_ema)
+            chex.assert_tree_all_finite(p_opt_state)
+            chex.assert_tree_all_finite(p_scale)
+            if device_count > 1:
+                chex.assert_trees_all_equal(*pytree_invert(p_params))
+                chex.assert_trees_all_equal(*pytree_invert(p_ema))
+                chex.assert_trees_all_equal(*pytree_invert(p_opt_state))
+                chex.assert_trees_all_equal(*pytree_invert(p_scale))
             yield Pack(workdir=workdir,
                        cfg=cfg,
                        ctx=ctx,
@@ -218,6 +218,7 @@ def train(params: optax.Params,
                        rngs=rngs,
                        mae=jnp.mean(jnp.array(maes)),
                        scale=scale)
+            maes.clear()
 
 
 def set_mixed_precision_policies(use_fp16: bool) -> jmp.Policy:
