@@ -1,14 +1,14 @@
 from typing import Union, Optional
 from pathlib import Path
 import math
+from chex import Array
 import matplotlib.pyplot as plt
 import matplotlib.image as plt_img
 import numpy as np
 import numpy.typing as npt
-import jax.numpy as jnp
 
 
-IMGLike = Union[npt.NDArray[np.float32], npt.NDArray[np.int32], jnp.ndarray]
+IMGLike = Union[npt.NDArray[np.float32], npt.NDArray[np.int32], Array]
 
 
 def canonicalize(imgs: IMGLike) -> npt.NDArray[np.float32]:

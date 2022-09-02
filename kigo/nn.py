@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Optional, List, Callable, Tuple
 from functools import partial
+from chex import Array
 import jax
 import jax.numpy as jnp
 import haiku as hk
@@ -18,15 +19,14 @@ class SinusoidalEmbedding(hk.Module):
         self.width = width
         self.freqs = jnp.logspace(0, 1., width // 2)
 
-    def __call__(self, t: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, t: Array) -> Array:
         xs = self.freqs[None, :] * t[:, None]
         return jnp.concatenate([jnp.sin(xs), jnp.cos(xs)], axis=-1)
 
 
-def fp32(fn: Callable[[jnp.ndarray], jnp.ndarray]
-         ) -> Callable[[jnp.ndarray], jnp.ndarray]:
+def fp32(fn: Callable[[Array], Array]) -> Callable[[Array], Array]:
 
-    def inner(x: jnp.ndarray) -> jnp.ndarray:
+    def inner(x: Array) -> Array:
         return fn(x.astype(jnp.float32)).astype(x.dtype)
 
     return inner
@@ -51,7 +51,7 @@ class Attention(hk.Module):
                                   w_init=hk.initializers.Constant(0.),
                                   b_init=hk.initializers.Constant(0.))
 
-    def __call__(self, xt: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, xt: Array) -> Array:
         _, h, w, _ = xt.shape
         xt_norm = self.norm(xt)
         xt_norm = jax.nn.silu(xt_norm)
@@ -62,9 +62,9 @@ class Attention(hk.Module):
         q = q * self.scale
         # Match queries to keys
         pattern = "b h d i, b h d j -> b h i j"
-        sim: jnp.ndarray = jnp.einsum(pattern, q, k)
+        sim: Array = jnp.einsum(pattern, q, k)
         sim = sim - jnp.amax(sim, axis=-1, keepdims=True)
-        attn: jnp.ndarray = fp32(jax.nn.softmax)(sim)
+        attn: Array = fp32(jax.nn.softmax)(sim)
         # Compute the values for each head
         pattern = "b h i j, b h d j -> b h i d"
         out = jnp.einsum(pattern, attn, v)
@@ -100,8 +100,7 @@ class ResBlock(hk.Module):
                           if att_heads > 0 else
                           None)
 
-    def __call__(self, xt: jnp.ndarray, snr_emb: jnp.ndarray, training: bool
-                 ) -> jnp.ndarray:
+    def __call__(self, xt: Array, snr_emb: Array, training: bool) -> Array:
         h = self.norm_1(xt)
         h = jax.nn.silu(h)
         h = self.conv_1(h)
@@ -172,10 +171,10 @@ class UBlock(hk.Module):
         ])
 
     def __call__(self,
-                 xt: jnp.ndarray,
-                 snr_emb: jnp.ndarray,
+                 xt: Array,
+                 snr_emb: Array,
                  training: bool
-                 ) -> jnp.ndarray:
+                 ) -> Array:
         h = self.in_proj(xt)
         for block in self.down_blocks:
             h = block(h, snr_emb, training)
@@ -221,8 +220,7 @@ class Model(hk.Module):
         '''Constructs a model from the given configuration.'''
         return cls(cfg.model, name=name)
 
-    def __call__(self, xt: jnp.ndarray, snr: jnp.ndarray, training: bool
-                 ) -> jnp.ndarray:
+    def __call__(self, xt: Array, snr: Array, training: bool) -> Array:
         snr_emb = self.snr_mlp(snr)
         h = self.in_proj(xt)
         h = self.ublock(h, snr_emb, training)
@@ -230,7 +228,7 @@ class Model(hk.Module):
         return h
 
 
-ForwardFn = Callable[[jnp.ndarray, jnp.ndarray, bool], jnp.ndarray]
+ForwardFn = Callable[[Array, Array, bool], Array]
 
 
 def get_params_and_forward_fn(cfg: Config,
@@ -238,10 +236,10 @@ def get_params_and_forward_fn(cfg: Config,
                               params: Optional[hk.Params] = None,
                               ) -> Tuple[hk.Params, ForwardFn]:
 
-    def forward_fn(xt: jnp.ndarray,
-                   snr: jnp.ndarray,
+    def forward_fn(xt: Array,
+                   snr: Array,
                    training: bool = False
-                   ) -> jnp.ndarray:
+                   ) -> Array:
         model = Model.from_cfg(cfg)
         return model(xt, snr, training)
 

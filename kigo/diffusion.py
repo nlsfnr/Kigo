@@ -1,5 +1,6 @@
 '''The implementation of the diffusion method.'''
 from typing import Tuple, Any, Union, TypeVar
+from chex import Array
 import jax
 import jax.numpy as jnp
 from einops import rearrange
@@ -7,15 +8,15 @@ from einops import rearrange
 from .nn import ForwardFn
 
 
-NumT = TypeVar('NumT', bound=Union[float, jnp.ndarray])
+NumT = TypeVar('NumT', bound=Union[float, Array])
 
 
-def expand(x: Union[float, jnp.ndarray], ref: jnp.ndarray) -> jnp.ndarray:
+def expand(x: Union[float, Array], ref: Array) -> Array:
     if isinstance(x, float):
         x = jnp.array([x] * ref.shape[0])
-    if isinstance(x, jnp.ndarray) and len(x.shape) == 1:
+    if isinstance(x, Array) and len(x.shape) == 1:
         x = rearrange(x, 'b -> b 1 1 1')
-    assert isinstance(x, jnp.ndarray)
+    assert isinstance(x, Array)
     return x
 
 
@@ -25,30 +26,27 @@ def gt0(x: NumT, eps: float = 1e-8) -> NumT:
     return jnp.clip(x, eps)
 
 
-def cosine_snr(t: Union[float, jnp.ndarray], s: float = 0.008) -> jnp.ndarray:
+def cosine_snr(t: Union[float, Array], s: float = 0.008) -> Array:
     '''Signal-to-noise ratio according to a cosine schedule.'''
     t = jnp.array(t)
     t = jnp.clip(t, 0., 1.)
     return jnp.cos((t + s) / (1. + s) * jnp.pi / 2) ** 2
 
 
-def sample_q(x0: jnp.ndarray,
-             noise: jnp.ndarray,
-             snr: jnp.ndarray,
-             ) -> jnp.ndarray:
+def sample_q(x0: Array, noise: Array, snr: Array) -> Array:
     snr = rearrange(snr, 'b -> b 1 1 1')
     # Eq. 4 in DDIM
     return gt0(snr) ** 0.5 * x0 + gt0(1. - snr) ** 0.5 * noise
 
 
-def sample_p_step(xt: jnp.ndarray,
-                  noise_pred: jnp.ndarray,
-                  snr: Union[float, jnp.ndarray],
-                  snr_next: Union[float, jnp.ndarray],
-                  eta: Union[float, jnp.ndarray],
-                  noise: jnp.ndarray,
+def sample_p_step(xt: Array,
+                  noise_pred: Array,
+                  snr: Union[float, Array],
+                  snr_next: Union[float, Array],
+                  eta: Union[float, Array],
+                  noise: Array,
                   clip_percentile: float = 0.995,
-                  ) -> jnp.ndarray:
+                  ) -> Array:
     snr = expand(snr, xt)
     snr_next = expand(snr_next, xt)
     eta = expand(eta, xt)
@@ -72,16 +70,15 @@ def sample_p_step(xt: jnp.ndarray,
     return xt
 
 
-def sample_p(xT: jnp.ndarray,
+def sample_p(xT: Array,
              forward_fn: ForwardFn,
              steps: int,
              rng: Any,
-             eta: Union[float, jnp.ndarray] = 0.,
+             eta: Union[float, Array] = 0.,
              clip_percentile: float = 0.995,
-             ) -> jnp.ndarray:
+             ) -> Array:
 
-    def body_fn(index: int, state: Tuple[jnp.ndarray, Any]
-                ) -> Tuple[jnp.ndarray, Any]:
+    def body_fn(index: int, state: Tuple[Array, Any]) -> Tuple[Array, Any]:
         xt, rng = state
         rng, rng_split = jax.random.split(rng)
         snr = jnp.repeat(cosine_snr(1. - index / steps), len(xt))

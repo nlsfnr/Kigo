@@ -11,6 +11,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import chex
+from chex import Array
 from einops import rearrange
 import wandb
 from wandb.sdk.wandb_run import Run as WandbRun
@@ -60,7 +61,7 @@ def get_opt_and_opt_state(cfg: Config,
                           opt_state: Optional[optax.OptState] = None,
                           ) -> Tuple[optax.MultiSteps, optax.OptState]:
 
-    def lr_schedule(step: jnp.ndarray) -> jnp.ndarray:
+    def lr_schedule(step: Array) -> Array:
         return jnp.minimum(1., step / cfg.tr.learning_rate_warmup_steps)
 
     opt = optax.chain(
@@ -84,20 +85,18 @@ def train(params: optax.Params,
           ctx: Context,
           ) -> Iterator[Pack]:
 
-    def forward_fn(x0: jnp.ndarray,
-                   snr: jnp.ndarray,
-                   ) -> jnp.ndarray:
+    def forward_fn(x0: Array, snr: Array) -> Array:
         return Model.from_cfg(cfg)(x0, snr, False)
 
     forward = hk.transform(forward_fn)
 
     def loss_fn(params_: optax.Params,
-                xt: jnp.ndarray,
-                snr: jnp.ndarray,
-                noise: jnp.ndarray,
+                xt: Array,
+                snr: Array,
+                noise: Array,
                 scale_: jmp.LossScale,
                 rng: Any,
-                ) -> Tuple[jnp.ndarray, Tuple[jnp.ndarray, jmp.LossScale]]:
+                ) -> Tuple[Array, Tuple[Array, jmp.LossScale]]:
         noise_pred = forward.apply(params_, rng, xt, snr)
         loss = jnp.mean((noise_pred - noise) ** 2)
         loss_scaled = scale_.scale(loss)
@@ -108,41 +107,31 @@ def train(params: optax.Params,
     set_mixed_precision_policies(cfg.tr.use_fp16)
 
     @partial(jax.pmap, axis_name='device', donate_argnums=6)
-    def train_step(x0: jnp.ndarray,
+    def train_step(x0: Array,
                    params_: optax.Params,
                    ema_: optax.Params,
                    opt_state_: optax.MultiStepsState,
                    rng: Any,
                    scale_: jmp.LossScale,
                    ) -> Tuple[optax.Params, optax.Params, optax.OptState,
-                              jmp.LossScale, jnp.ndarray]:
+                              jmp.LossScale, Array]:
         rng, rng_split = jax.random.split(rng)
         noise = jax.random.normal(rng, shape=x0.shape)
         rng, rng_split = jax.random.split(rng)
-        # Randomly sample from the SNR schedule
         snr = cosine_snr(jax.random.uniform(rng_split, shape=(len(x0),)))
-        # Compute the noisy training sample
         xt = sample_q(x0, noise, snr)
-        # Compute the gradients on each device
         gradients, loss = gradient_fn(params_, xt, snr, noise, scale_, rng)
-        # Take the mean of all gradients, across all devices
         gradients = jax.lax.pmean(gradients, axis_name='device')
-        # Undo the scaling needed for mixed precision
         gradients = scale_.unscale(gradients)
-        # Check if the scaling resulted in NaNs
         gradients_finite = jmp.all_finite(gradients)
-        # Update the scale accordingly
         scale_ = scale_.adjust(gradients_finite)
 
         def on_gradients_finite(_: Any) -> Tuple[optax.Params,
                                                  optax.Params,
                                                  optax.MultiStepsState]:
-            # Compute the parameter updates and new optimizer state
             updates, new_opt_state = opt.update(gradients, opt_state_,
                                                 params=params_)
-            # Apply the updates to the parameters
             new_params_ = optax.apply_updates(params_, updates)
-            # Update the EMA of the parameters
             new_ema_ = optax.incremental_update(
                 params_, ema_, step_size=1. - cfg.tr.ema_alpha)
             return new_params_, new_ema_, new_opt_state
@@ -270,7 +259,7 @@ def wandb_log(packs: Iterator[Pack]) -> Iterator[Pack]:
             maes.append(pack.mae)
             if run is None:
                 run = _get_wandb_run(pack)
-            maes_: jnp.ndarray = jnp.array(maes)
+            maes_: Array = jnp.array(maes)
             maes.clear()
             _log_to_wandb(run, pack, jnp.mean(maes_))
             if pack.ctx.periodically(pack.cfg.tr.wandb_.img_freq):
