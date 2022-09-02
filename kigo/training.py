@@ -10,6 +10,7 @@ import jmp
 import jax
 import jax.numpy as jnp
 import numpy as np
+import chex
 from einops import rearrange
 import wandb
 from wandb.sdk.wandb_run import Run as WandbRun
@@ -84,7 +85,7 @@ def train(params: optax.Params,
           ) -> Iterator[Pack]:
 
     scale = jmp.DynamicLossScale(jnp.asarray(ctx.loss_scale),
-                                 period=cfg.tr.dynamic_loss_period)
+                                 period=cfg.tr.dynamic_scale_period)
 
     def forward_fn(x0: jnp.ndarray,
                    snr: jnp.ndarray,
@@ -164,20 +165,25 @@ def train(params: optax.Params,
                 for batch in iter(dataset.dataloader()))
     device_count = jax.device_count()
     logger.info(f'Devices found: {device_count}.')
+    # Helper functions for dealing with sharded pytrees.
+    array_broadcast = lambda x: jnp.broadcast_to(x, (device_count, *x.shape))
+    pytree_broadcast = lambda t: jax.tree_util.tree_map(array_broadcast, t)
+    # The inverse of broadcasting the params etc. across devices. This is used
+    # when we want to yield the current training state to downstream functions,
+    # e.g. autosave.
+    pytree_collapse = lambda t, i=0: jax.tree_util.tree_map(lambda x: x[i], t)
+    # Converts a pytree containing sharded ndarrays into a tuple of pytrees
+    # containing non-sharded ndarrays. Each of the latter are on one device.
+    pytree_invert = lambda t: tuple([pytree_collapse(t, i)
+                                     for i in range(device_count)])
     # Broadcast the params, ema and opt_state to all devices so we can use them
     # inside train_step, which is compiled with jax.pmap. Only the gradients
     # will be shared between each device, minimizing the communication
     # overhead.
-    arr_broadcast = lambda x: jnp.broadcast_to(x, (device_count, *x.shape))
-    pytree_broadcast = lambda t: jax.tree_util.tree_map(arr_broadcast, t)
     p_params = pytree_broadcast(params)
     p_ema = pytree_broadcast(ema)
     p_opt_state = pytree_broadcast(opt_state)
     p_scale = pytree_broadcast(scale)
-    # The inverse of broadcasting the params etc. across devices. This is used
-    # when we want to yield the current training state to downstream functions,
-    # e.g. autosave.
-    pytree_collapse = lambda t: jax.tree_util.tree_map(lambda x: x[0], t)
     while True:
         maes = []
         for _ in range(cfg.tr.gradient_accumulation_steps):
@@ -189,7 +195,17 @@ def train(params: optax.Params,
                                p_scale)
             p_params, p_ema, p_opt_state, p_scale, p_mae = state
             maes.append(float(p_mae.mean()))
+        chex.assert_tree_all_finite(p_params)
+        chex.assert_tree_all_finite(p_ema)
+        chex.assert_tree_all_finite(p_opt_state)
+        chex.assert_tree_all_finite(p_scale)
+        if device_count > 1:
+            chex.assert_trees_all_equal(*pytree_invert(p_params))
+            chex.assert_trees_all_equal(*pytree_invert(p_ema))
+            chex.assert_trees_all_equal(*pytree_invert(p_opt_state))
+            chex.assert_trees_all_equal(*pytree_invert(p_scale))
         ctx.iteration += 1
+        # Yield the state to downstream tasks.
         scale = pytree_collapse(p_scale)
         ctx.loss_scale = int(scale.loss_scale)
         if ctx.iteration % cfg.tr.yield_freq == 0:

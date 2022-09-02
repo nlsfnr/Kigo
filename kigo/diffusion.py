@@ -19,7 +19,7 @@ def expand(x: Union[float, jnp.ndarray], ref: jnp.ndarray) -> jnp.ndarray:
     return x
 
 
-def gt0(x: NumT, eps: float = 1e-12) -> NumT:
+def gt0(x: NumT, eps: float = 1e-8) -> NumT:
     '''Ensures that x is greater than zero, i.e. can be safely used as a
     divisor or for sqrts.'''
     return jnp.clip(x, eps)

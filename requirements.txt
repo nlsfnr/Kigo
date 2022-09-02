@@ -2,6 +2,7 @@
 # listed here. Please install it manually!
 dm-haiku
 optax
+chex
 git+https://github.com/nlsfnr/jmp  # Replace this in favor of the below later
 # git+https://github.com/deepmind/jmp  # Mixed precision
 
