@@ -116,7 +116,7 @@ def train(params: optax.Params,
                    ) -> Tuple[optax.Params, optax.Params, optax.OptState,
                               jmp.LossScale, Array]:
         rng, rng_split = jax.random.split(rng)
-        noise = jax.random.normal(rng, shape=x0.shape)
+        noise = jax.random.normal(rng_split, shape=x0.shape)
         rng, rng_split = jax.random.split(rng)
         snr = cosine_snr(jax.random.uniform(rng_split, shape=(len(x0),)))
         xt = sample_q(x0, noise, snr)
@@ -168,8 +168,8 @@ def train(params: optax.Params,
     p_params = pytree_broadcast(params)
     p_ema = pytree_broadcast(ema)
     p_opt_state = pytree_broadcast(opt_state)
-    p_scale = pytree_broadcast(jmp.DynamicLossScale(
-        jnp.asarray(ctx.loss_scale), period=cfg.tr.dynamic_scale_period))
+    p_scale = pytree_broadcast(jmp.StaticLossScale(
+        jnp.asarray(ctx.loss_scale)))
     maes = []
     while True:
         for _ in range(cfg.tr.gradient_accumulation_steps):
