@@ -59,7 +59,8 @@ class Pack:
 def get_opt_and_opt_state(cfg: Config,
                           params: optax.Params,
                           opt_state: Optional[optax.OptState] = None,
-                          ) -> Tuple[optax.MultiSteps, optax.OptState]:
+                          ) -> Tuple[optax.GradientTransformation,
+                                     optax.OptState]:
 
     def lr_schedule(step: Array) -> Array:
         return jnp.minimum(1., step / cfg.tr.learning_rate_warmup_steps)
@@ -70,9 +71,9 @@ def get_opt_and_opt_state(cfg: Config,
                     weight_decay=cfg.tr.weight_decay),
         optax.scale_by_schedule(lr_schedule),
     )
-    ms_opt = optax.MultiSteps(opt, cfg.tr.gradient_accumulation_steps)
-    opt_state = ms_opt.init(params) if opt_state is None else opt_state
-    return ms_opt, opt_state
+    # opt = optax.MultiSteps(opt, cfg.tr.gradient_accumulation_steps)
+    opt_state = opt.init(params) if opt_state is None else opt_state
+    return opt, opt_state
 
 
 def train(params: optax.Params,
@@ -110,7 +111,7 @@ def train(params: optax.Params,
     def train_step(x0: Array,
                    params_: optax.Params,
                    ema_: optax.Params,
-                   opt_state_: optax.MultiStepsState,
+                   opt_state_: optax.OptState,
                    rng: Any,
                    scale_: jmp.LossScale,
                    ) -> Tuple[optax.Params, optax.Params, optax.OptState,
@@ -128,7 +129,7 @@ def train(params: optax.Params,
 
         def on_gradients_finite(_: Any) -> Tuple[optax.Params,
                                                  optax.Params,
-                                                 optax.MultiStepsState]:
+                                                 optax.OptState]:
             updates, new_opt_state = opt.update(gradients, opt_state_,
                                                 params=params_)
             new_params_ = optax.apply_updates(params_, updates)
@@ -138,7 +139,7 @@ def train(params: optax.Params,
 
         def on_gradients_infinite(_: Any) -> Tuple[optax.Params,
                                                    optax.Params,
-                                                   optax.MultiStepsState]:
+                                                   optax.OptState]:
             return params_, ema_, opt_state_
 
         params_, ema_, opt_state_ = jax.lax.cond(gradients_finite,
@@ -170,16 +171,15 @@ def train(params: optax.Params,
     p_opt_state = pytree_broadcast(opt_state)
     p_scale = pytree_broadcast(jmp.DynamicLossScale(
         jnp.asarray(ctx.loss_scale), period=cfg.tr.dynamic_scale_period))
-    maes = []
     while True:
-        for _ in range(cfg.tr.gradient_accumulation_steps):
-            p_batch = rearrange(next(batch_it), '(d b) ... -> d b ...',
-                                d=device_count)
-            p_rng = jnp.array([next(rngs) for _ in range(device_count)])
-            state = train_step(p_batch, p_params, p_ema, p_opt_state, p_rng,
-                               p_scale)
-            p_params, p_ema, p_opt_state, p_scale, p_mae = state
-            maes.append(float(p_mae.mean()))
+        # for _ in range(cfg.tr.gradient_accumulation_steps):
+        p_batch = rearrange(next(batch_it), '(d b) ... -> d b ...',
+                            d=device_count)
+        p_rng = jnp.array([next(rngs) for _ in range(device_count)])
+        state = train_step(p_batch, p_params, p_ema, p_opt_state, p_rng,
+                           p_scale)
+        p_params, p_ema, p_opt_state, p_scale, p_mae = state
+        mae = p_mae.mean()
         if ctx.periodically(cfg.tr.check_sync_freq):
             if device_count > 1:
                 chex.assert_trees_all_equal(*pytree_invert(p_params))
@@ -201,9 +201,8 @@ def train(params: optax.Params,
                        ema=pytree_collapse(p_ema),
                        opt_state=pytree_collapse(p_opt_state),
                        rngs=rngs,
-                       mae=jnp.mean(jnp.array(maes)),
+                       mae=mae,
                        scale=scale)
-            maes.clear()
         ctx.iteration += 1
 
 

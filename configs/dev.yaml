@@ -15,7 +15,7 @@ tr:
   learning_rate_warmup_steps: 500
   weight_decay: 0.0
   gradient_clipping: 1.0
-  gradient_accumulation_steps: 1
+  # gradient_accumulation_steps: 1
   batch_size: 32
   ema_alpha: 0.99
   yield_freq: 10
