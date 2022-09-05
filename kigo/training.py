@@ -168,8 +168,10 @@ def train(params: optax.Params,
     p_params = pytree_broadcast(params)
     p_ema = pytree_broadcast(ema)
     p_opt_state = pytree_broadcast(opt_state)
-    p_scale = pytree_broadcast(jmp.StaticLossScale(
-        jnp.asarray(ctx.loss_scale)))
+    p_scale = pytree_broadcast(
+        jmp.StaticLossScale(jnp.asarray(ctx.loss_scale))
+        if cfg.tr.use_fp16 else
+        jmp.NoOpLossScale())
     maes = []
     while True:
         for _ in range(cfg.tr.gradient_accumulation_steps):
