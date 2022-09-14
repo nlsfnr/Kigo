@@ -13,7 +13,7 @@ import haiku as hk
 import optax
 
 from .configs import Config
-from .utils import get_logger, make_symlink, PathLike, Directory, File
+from .utils import get_logger, make_symlink, PathLike, Directory, File, Params
 from .nn import get_params_and_forward_fn
 from . import training
 
@@ -31,9 +31,6 @@ LATEST_CHECKPOINT_SYMLINK = 'latest-checkpoint'
 WORKDIR_MARKER = 'workdir-marker'
 CHECKPOINT_MARKER = 'checkpoint-marker'
 INITIAL_CHECKPOINT_NAME = 'initial'
-
-
-Params = Union[hk.Params, optax.Params]
 
 
 def get_config(x: Union[PathLike, Config]) -> Config:
@@ -99,7 +96,8 @@ def init_workdir(workdir: Path, config_file: File, rng_key: hk.PRNGSequence
     mark_as_workdir(workdir)
     cfg = Config.from_yaml(config_file)
     params, _ = get_params_and_forward_fn(cfg, rng_key)
-    _, opt_state = training.get_opt_and_opt_state(cfg, params)
+    opt = training.get_opt(cfg)
+    opt_state = opt.init(params)
     ctx = training.Context.from_cfg(cfg)
     save(workdir / INITIAL_CHECKPOINT_NAME,
          params=params,

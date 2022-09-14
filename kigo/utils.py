@@ -1,9 +1,17 @@
 from __future__ import annotations
-from typing import Union, TypeVar, Type, cast
+from typing import Union, TypeVar, Type, cast, Optional, Tuple
 from abc import ABC, abstractmethod
+import random
 import os
 import logging
 from pathlib import Path
+import haiku as hk
+import jax
+import jax.numpy as jnp
+import optax
+
+
+Params = Union[hk.Params, optax.Params]
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -20,6 +28,16 @@ def get_logger(name: str) -> logging.Logger:
     logger.setLevel(logging.INFO)
     logger.propagate = False
     return logger
+
+
+logger = get_logger('kigo.cli')
+
+
+def get_rngs(seed: Optional[int]) -> hk.PRNGSequence:
+    if seed is None:
+        seed = random.randint(0, 1 << 32)
+    logger.info(f'Using seed: {seed}')
+    return hk.PRNGSequence(seed)
 
 
 def random_name(namespace: str = 'global', prefix: str = 'run') -> str:
@@ -106,3 +124,24 @@ class Directory(_ValidatedPath, Path):
         if not path.exists():
             path.mkdir(parents=True, exist_ok=True)
         return cls(path)
+
+
+T = TypeVar('T')
+
+
+def pytree_broadcast(tree: T, device_count: Optional[int] = None) -> T:
+    if device_count is None:
+        device_count = jax.device_count()
+    fn = lambda x: jnp.broadcast_to(x, (device_count, *x.shape))
+    return jax.tree_util.tree_map(fn, tree)
+
+
+def pytree_collapse(tree: T, index: int = 0) -> T:
+    return jax.tree_util.tree_map(lambda x: x[index], tree)
+
+
+def pytree_invert(tree: T, device_count: Optional[int] = None,
+                  ) -> Tuple[T, ...]:
+    if device_count is None:
+        device_count = jax.device_count()
+    return tuple([pytree_collapse(tree, i) for i in range(device_count)])

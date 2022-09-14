@@ -38,12 +38,12 @@ class WandBConfig(BaseModel):
 class TrainingConfig(BaseModel):
     use_fp16: bool
     loss_scale: int
-    # dynamic_scale_period: int
+    dynamic_scale_period: int
     # Optimizer
     learning_rate: float
     learning_rate_warmup_steps: int
     weight_decay: float
-    gradient_accumulation_steps: int
+    # gradient_accumulation_steps: int
     gradient_clipping: float
     # Batches
     batch_size: int

@@ -243,10 +243,10 @@ def get_params_and_forward_fn(cfg: Config,
         model = Model.from_cfg(cfg)
         return model(xt, snr, training)
 
-    S, B = cfg.img.size, 1
-    repr_xt = jnp.zeros((B, S, S, cfg.model.input_channels))
-    repr_t = jnp.zeros((B,))
     model = hk.transform(forward_fn)
     if params is None:
+        S, B = cfg.img.size, 1
+        repr_xt = jnp.zeros((B, S, S, cfg.model.input_channels))
+        repr_t = jnp.zeros((B,))
         params = model.init(next(rng_key), repr_xt, repr_t)
     return params, partial(model.apply, params, next(rng_key))

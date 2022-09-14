@@ -4,6 +4,9 @@
 season, used in traditional forms of Japanese poetry. Kigos commonly occur in
 Haikus.
 
+Kigo implements a diffusion model using Jax, DM-Haiku, Optax and other tools
+from the DeepMind stack.
+
 ## Setup
 
 Because each JAX installation is different depending on your CUDA version, Jax

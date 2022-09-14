@@ -5,12 +5,10 @@ warnings.filterwarnings('ignore')
 from typing import Optional
 from pathlib import Path
 import os
-import random
 import click
-import haiku as hk
 import jax
 
-from kigo.utils import File, get_logger
+from kigo.utils import File, get_logger, get_rngs
 from kigo import nn
 from kigo import diffusion
 from kigo import viz
@@ -33,6 +31,8 @@ def cli() -> None:
 @click.argument('config', type=File)
 @click.option('--seed', type=int, default=None)
 def init(workdir: Path, config: File, seed: Optional[int]) -> None:
+    '''Initializes a new model in the given working directory with the given
+    configuration file.'''
     rngs = get_rngs(seed)
     persistence.init_workdir(workdir, config, rngs)
 
@@ -42,6 +42,10 @@ def init(workdir: Path, config: File, seed: Optional[int]) -> None:
 @click.option('--debug', is_flag=True)
 @click.option('--seed', type=int, default=None)
 def train(checkpoint: Path, debug: bool, seed: Optional[int]) -> None:
+    '''Trains the model in the given directory. The latter can either be a
+    working directory as specified in the `init` command or a checkpoint within
+    a working directory. The training continues until interrupted with
+    Ctrl+c.'''
     jax.config.update('jax_disable_jit', debug)  # type: ignore
     rngs = get_rngs(seed)
     cfg = persistence.load_cfg(checkpoint)
@@ -73,6 +77,7 @@ def train(checkpoint: Path, debug: bool, seed: Optional[int]) -> None:
 def syn(checkpoint: Path, steps: int, no_ema: bool, eta: float,
         clip_percentile: float, out: Optional[Path], seed: Optional[int],
         debug: bool) -> None:
+    '''Synthesizes a new image from the model using DDIM sampling.'''
     jax.config.update('jax_disable_jit', debug)  # type: ignore
     rngs = get_rngs(seed)
     cfg = persistence.load_cfg(checkpoint)
@@ -117,13 +122,6 @@ def slurm_cli(cp: Path,
     with open(out, 'w') as fh:
         fh.write(src.strip())
     logger.info(f'Saved Slurm script to {out}')
-
-
-def get_rngs(seed: Optional[int]) -> hk.PRNGSequence:
-    if seed is None:
-        seed = random.randint(0, 1 << 32)
-    logger.info(f'Using seed: {seed}')
-    return hk.PRNGSequence(seed)
 
 
 if __name__ == '__main__':

@@ -1,11 +1,14 @@
 '''The implementation of the diffusion method.'''
-from typing import Tuple, Any, Union, TypeVar
+from __future__ import annotations
+from typing import Tuple, Any, Union, TypeVar, Callable
 from chex import Array
 import jax
 import jax.numpy as jnp
 from einops import rearrange
+import haiku as hk
 
-from .nn import ForwardFn
+from .nn import ForwardFn, Model
+from .utils import Params
 
 
 NumT = TypeVar('NumT', bound=Union[float, Array])
@@ -45,7 +48,7 @@ def sample_p_step(xt: Array,
                   snr_next: Union[float, Array],
                   eta: Union[float, Array],
                   noise: Array,
-                  clip_percentile: float = 0.995,
+                  clip_percentile: Union[float, Array] = 0.995,
                   ) -> Array:
     snr = expand(snr, xt)
     snr_next = expand(snr_next, xt)
@@ -92,3 +95,47 @@ def sample_p(xT: Array,
     initial_state = xT, rng
     x0, _ = jax.lax.fori_loop(0, steps, body_fn, initial_state)
     return x0
+
+
+class Sampler:
+
+    def __init__(self, params: Params, model_fn: Callable[[], Model]) -> None:
+        self.params = params
+
+        def forward_fn(xt: Array, snr: Array) -> Array:
+            return model_fn()(xt, snr, False)
+
+        forward = hk.transform(forward_fn)
+        forward = hk.without_apply_rng(forward)
+
+        def body_fn(index: int,
+                    state: Tuple[Array, Params, Any, int, float, float],
+                    ) -> Tuple[Array, Params, Any, int, float, float]:
+            xt, params, rng, steps, eta, clip_percentile = state
+            rng, rng_split = jax.random.split(rng)
+            snr = jnp.repeat(cosine_snr(1. - index / steps), len(xt))
+            snr_next = jnp.repeat(cosine_snr(1. - (index + 1) / steps),
+                                  len(xt))
+            noise_pred = forward.apply(params, xt, snr)
+            noise = jax.random.normal(rng_split, shape=xt.shape)
+            xt_next = sample_p_step(xt, noise_pred, snr, snr_next, eta, noise,
+                                    clip_percentile)
+            return xt_next, params, rng, steps, eta, clip_percentile
+
+        self.body_fn = jax.jit(body_fn)
+
+    def set_params(self, params: Params) -> Sampler:
+        self._params = params
+        return self
+
+
+    def sample_p(self,
+                 xT: Array,
+                 steps: int,
+                 rng: Any,
+                 eta: float = 0.,
+                 clip_percentile: float = 0.995,
+                 ) -> Array:
+        initial_state = xT, self.params, rng, steps, eta, clip_percentile
+        x0, *_ = jax.lax.fori_loop(0, steps, self.body_fn, initial_state)
+        return x0
