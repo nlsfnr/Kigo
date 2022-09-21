@@ -9,7 +9,7 @@ import click
 from chex import Array
 import haiku as hk
 import jax
-from flask import Flask, Response
+from flask import Flask, Response, request
 import numpy as np
 
 from kigo.utils import get_logger, get_rngs
@@ -44,8 +44,19 @@ def build_app(sampler: diffusion.Sampler,
 
     @app.route('/', methods=['GET'])
     def index() -> Response:
+        # Validation
+        steps = int(request.args.get('steps', 64))
+        if not (0 < steps <= 1024):
+            return Response('Invalid "steps" value: 0 < steps <= 1024.', 400)
+        eta = float(request.args.get('eta', 0.1))
+        if not (0. <= eta <= 1.):
+            return Response('Invalid "eta" value: 0 <= eta <= 1.', 400)
+        clip = float(request.args.get('clip', 0.1))
+        if not (0. <= clip <= 1.):
+            return Response('Invalid "clip" value: 0 <= clip <= 1.', 400)
+        # Run sampler
         xT = jax.random.normal(next(rngs), shape=(1, *cfg.img.shape))
-        x0 = sampler.sample_p(xT, 64, next(rngs), 0.1, 0.995)
+        x0 = sampler.sample_p(xT, steps, next(rngs), eta, clip)
         return Response(to_html(x0))
 
     return app

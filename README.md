@@ -48,7 +48,66 @@ this case. Using symlinks, Kigo will automatically find the latest checkpoint
 inside of a working directory, however, one can sample from a specific
 checkpoint by running e.g. `./cli.py syn zoo/my-model/001000/`.
 
-# Other
+## Code
+
+This section is supposed to give a good overview of the code and its structure.
+To this end, some interesting parts of the code are given. All of the code is
+annotated with types, type-checked with MyPy and linted with Flake8.
+
+### Model
+
+The implementation of the model can be found
+[here](https://github.com/nlsfnr/Kigo/blob/master/kigo/nn.py#L191). The model is
+a version of UNet with a recursive implementation. It is instantiated using a
+`Config`.
+
+### Config
+
+To serve as a single source of truth and make model versioning and persistence
+easier, a configuration is loaded from a `.yaml` file each time that a model is
+interacted with. The structure of the configuration is defined
+[here](https://github.com/nlsfnr/Kigo/blob/master/kigo/configs.py).
+
+### Persistence
+
+To store and load checkpoints including optimizer, model EMA, configuration and
+others, the `persistence` is used. It is implemented
+[here](https://github.com/nlsfnr/Kigo/blob/master/kigo/persistence.py). It also
+provides functionality to automatically find and define checkpoint directories.
+
+### Training
+
+The training loop and other associated functionality is implemented
+[here](https://github.com/nlsfnr/Kigo/blob/master/kigo/training.py). The
+[`train`
+function](https://github.com/nlsfnr/Kigo/blob/master/kigo/training.py#L117)
+returns an iterator of
+[`Pack`s](https://github.com/nlsfnr/Kigo/blob/master/kigo/training.py#L45) which
+contain e.g. the current model parameter, the optimizer state etc. Said iterator
+is then passed to functions downstream, such as
+[logging](https://github.com/nlsfnr/Kigo/blob/master/kigo/training.py#L177),
+[automatic
+saving](https://github.com/nlsfnr/Kigo/blob/master/kigo/training.py#L153) and
+[remote
+logging](https://github.com/nlsfnr/Kigo/blob/master/kigo/training.py#L185) on
+[Weights and Biases](https://wandb.ai). This allows for maximum flexibility and
+keeps each function clean and understandable.
+
+The train function acts as a wrapper around the [train_step
+function](https://github.com/nlsfnr/Kigo/blob/master/kigo/training.py#L92). The
+latter is `jax.pmap`ped across all devices, allowing for multi-device training.
+
+### Diffusion
+
+All diffusion specific algorithms are implemented
+[here](https://github.com/nlsfnr/Kigo/blob/master/kigo/diffusion.py). The meat
+of the sampling process is implemented inside
+[sample_p_step](https://github.com/nlsfnr/Kigo/blob/master/kigo/diffusion.py#L45)
+which performs one iteration of DDIM sampling given the current image, the
+model's prediction of the noise the signal-to-noise-ratio (SNR) and other scalar
+parameters. It uses the dynamic thresholding from Google Brain's Imagen.
+
+## Other
 
 This project was implemented using tools from the [DeepMind Jax
 ecosystem](https://www.deepmind.com/blog/using-jax-to-accelerate-our-research).

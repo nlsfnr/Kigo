@@ -6,3 +6,4 @@ ddim.png ddpm.png
 .global.name_counter
 wandb/
 data
+.data

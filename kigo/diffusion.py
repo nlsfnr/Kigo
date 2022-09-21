@@ -8,9 +8,10 @@ from einops import rearrange
 import haiku as hk
 
 from .nn import ForwardFn, Model
-from .utils import Params
+from .utils import Params, get_logger
 
 
+logger = get_logger('kigo.diffusion')
 NumT = TypeVar('NumT', bound=Union[float, Array])
 
 
@@ -49,7 +50,7 @@ def sample_p_step(xt: Array,
                   eta: Union[float, Array],
                   noise: Array,
                   clip_percentile: Union[float, Array] = 0.995,
-                  ) -> Array:
+                  ) -> Tuple[Array, Array]:
     snr = expand(snr, xt)
     snr_next = expand(snr_next, xt)
     eta = expand(eta, xt)
@@ -70,7 +71,7 @@ def sample_p_step(xt: Array,
     xt = (x0_hat * gt0(snr_next) ** 0.5
           + noise_pred * gt0(1. - snr_next - sigma ** 2) ** 0.5
           + noise * sigma)
-    return xt
+    return xt, x0_hat
 
 
 def sample_p(xT: Array,
@@ -88,8 +89,8 @@ def sample_p(xT: Array,
         snr_next = jnp.repeat(cosine_snr(1. - (index + 1) / steps), len(xt))
         noise_pred = forward_fn(xt, snr, False)
         noise = jax.random.normal(rng_split, shape=xt.shape)
-        xt_next = sample_p_step(xt, noise_pred, snr, snr_next, eta, noise,
-                                clip_percentile)
+        xt_next, _ = sample_p_step(xt, noise_pred, snr, snr_next, eta, noise,
+                                   clip_percentile)
         return xt_next, rng
 
     initial_state = xT, rng
@@ -118,8 +119,8 @@ class Sampler:
                                   len(xt))
             noise_pred = forward.apply(params, xt, snr)
             noise = jax.random.normal(rng_split, shape=xt.shape)
-            xt_next = sample_p_step(xt, noise_pred, snr, snr_next, eta, noise,
-                                    clip_percentile)
+            xt_next, _ = sample_p_step(xt, noise_pred, snr, snr_next, eta,
+                                       noise, clip_percentile)
             return xt_next, params, rng, steps, eta, clip_percentile
 
         self.body_fn = jax.jit(body_fn)
@@ -127,7 +128,6 @@ class Sampler:
     def set_params(self, params: Params) -> Sampler:
         self._params = params
         return self
-
 
     def sample_p(self,
                  xT: Array,
@@ -138,4 +138,7 @@ class Sampler:
                  ) -> Array:
         initial_state = xT, self.params, rng, steps, eta, clip_percentile
         x0, *_ = jax.lax.fori_loop(0, steps, self.body_fn, initial_state)
+        logger.info(f'min={x0.min()}, max={x0.max()}, mean={x0.mean()}, '
+                    f'std={x0.std()}')
+        x0 = x0.clip(-1., 1.)
         return x0
