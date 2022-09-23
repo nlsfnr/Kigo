@@ -12,7 +12,7 @@ tr:
   loss_scale: 16384
   dynamic_scale_period: 500
   learning_rate: 0.0002
-  learning_rate_warmup_steps: 500
+  learning_rate_warmup_steps: 10
   weight_decay: 0.0
   gradient_clipping: 1.0
   # gradient_accumulation_steps: 1
@@ -51,8 +51,8 @@ model:
     - channels: 256
       blocks: 2
       groupnorm_groups: 8
-      attention_heads: 0
-      attention_head_channels: 0
+      attention_heads: 2
+      attention_head_channels: 32
       dropout: 0.1
   outer_groupnorm_groups: 8
   outer_channels: 32

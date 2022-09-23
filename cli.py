@@ -72,11 +72,12 @@ def train(checkpoint: Path, debug: bool, seed: Optional[int]) -> None:
 @click.option('--eta', type=float, default=0.)
 @click.option('--clip-percentile', '-c', type=float, default=0.995)
 @click.option('--out', '-o', type=Path, default=None)
+@click.option('--number', '-n', type=int, default=1)
 @click.option('--debug', is_flag=True)
 @click.option('--seed', type=int, default=None)
 def syn(checkpoint: Path, steps: int, no_ema: bool, eta: float,
-        clip_percentile: float, out: Optional[Path], seed: Optional[int],
-        debug: bool) -> None:
+        clip_percentile: float, out: Optional[Path], number: int,
+        seed: Optional[int], debug: bool) -> None:
     '''Synthesizes a new image from the model using DDIM sampling.'''
     jax.config.update('jax_disable_jit', debug)  # type: ignore
     rngs = get_rngs(seed)
@@ -85,7 +86,7 @@ def syn(checkpoint: Path, steps: int, no_ema: bool, eta: float,
               if no_ema else
               persistence.load_ema(checkpoint))
     _, forward_fn = nn.get_params_and_forward_fn(cfg, rngs, params)
-    xT = jax.random.normal(next(rngs), shape=(1, *cfg.img.shape))
+    xT = jax.random.normal(next(rngs), shape=(number, *cfg.img.shape))
     x0 = diffusion.sample_p(xT, forward_fn, steps, next(rngs), eta,
                             clip_percentile)
     viz.show(x0, out=out)

@@ -33,7 +33,6 @@ tr:
     name: 'syn-64x64-200M-A'
     tags: ['Viking', '64x64']
 
-
 model:
   outer_groupnorm_groups: 8
   outer_channels: 192
