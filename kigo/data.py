@@ -49,7 +49,7 @@ class Dataset(PTDataset[ArrF32]):
                 if not file_str.lower().endswith(extensions):
                     continue
                 file = root / file_str
-                files.append(file)
+                files.append(file.resolve())
                 if len(files) % 100_000 == 0:
                     logger.info(f'Found {len(files)} files...')
         logger.info(f'Found a total of {len(files)} files in {path}')

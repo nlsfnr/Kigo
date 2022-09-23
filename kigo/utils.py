@@ -130,6 +130,8 @@ T = TypeVar('T')
 
 
 def pytree_broadcast(tree: T, device_count: Optional[int] = None) -> T:
+    '''Returns a pytree with the same structure where each leaf has a new
+    leading dimension equal to the number of devices.'''
     if device_count is None:
         device_count = jax.device_count()
     fn = lambda x: jnp.broadcast_to(x, (device_count, *x.shape))
@@ -137,6 +139,7 @@ def pytree_broadcast(tree: T, device_count: Optional[int] = None) -> T:
 
 
 def pytree_collapse(tree: T, index: int = 0) -> T:
+    '''Reverse operation of `pytree_broadcast`.'''
     return jax.tree_util.tree_map(lambda x: x[index], tree)
 
 

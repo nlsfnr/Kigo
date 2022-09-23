@@ -25,6 +25,8 @@ class SinusoidalEmbedding(hk.Module):
 
 
 def fp32(fn: Callable[[Array], Array]) -> Callable[[Array], Array]:
+    '''Forces the given function to be performed in full precision, i.e. 32 bit
+    floating point numbers.'''
 
     def inner(x: Array) -> Array:
         return fn(x.astype(jnp.float32)).astype(x.dtype)
@@ -132,7 +134,7 @@ class UBlock(hk.Module):
         self.ub_cfg, *inner_ub_cfgs = ub_cfgs
         ch = self.ub_cfg.channels
         self.in_proj = hk.Sequential([
-            hk.GroupNorm(self.ub_cfg.groupnorm_groups),
+            fp32(hk.GroupNorm(self.ub_cfg.groupnorm_groups)),
             jax.nn.silu,
             (hk.Conv2D(ch, 1)
              if is_outer else
@@ -163,7 +165,7 @@ class UBlock(hk.Module):
             for _ in range(self.ub_cfg.blocks)
         ]
         self.out_proj = hk.Sequential([
-            hk.GroupNorm(self.ub_cfg.groupnorm_groups),
+            fp32(hk.GroupNorm(self.ub_cfg.groupnorm_groups)),
             jax.nn.silu,
             (hk.Conv2D(outer_channels, 1)  # type: ignore
              if is_outer else
@@ -202,7 +204,7 @@ class Model(hk.Module):
                              outer_channels=self.model_cfg.outer_channels,
                              is_outer=True)
         self.out_proj = hk.Sequential([
-            hk.GroupNorm(self.model_cfg.outer_groupnorm_groups),
+            fp32(hk.GroupNorm(self.model_cfg.outer_groupnorm_groups)),
             jax.nn.silu,
             hk.Conv2D(self.model_cfg.output_channels, 3,
                       w_init=hk.initializers.Constant(0.),
@@ -221,7 +223,7 @@ class Model(hk.Module):
         return cls(cfg.model, name=name)
 
     def __call__(self, xt: Array, snr: Array, training: bool) -> Array:
-        snr_emb = self.snr_mlp(snr)
+        snr_emb = self.snr_mlp(snr).astype(xt.dtype)
         h = self.in_proj(xt)
         h = self.ublock(h, snr_emb, training)
         h = self.out_proj(h)
