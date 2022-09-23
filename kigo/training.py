@@ -124,7 +124,7 @@ def train_step_fn(x0: Array,
     opt = get_opt(cfg)
     updates, new_opt_state = opt.update(gradients, opt_state, params=params)
     new_params = optax.apply_updates(params, updates)
-    new_ema = optax.incremental_update(params, ema,
+    new_ema = optax.incremental_update(new_params, ema,
                                        step_size=1 - cfg.tr.ema_alpha)
     # Only actually update the params etc. if all gradients were finite
     opt_state, params, ema = jmp.select_tree(
@@ -167,12 +167,15 @@ def train(params: optax.Params,
         jmp.DynamicLossScale(
             jnp.array(cfg.tr.loss_scale),
             counter=jnp.array(ctx.iteration % cfg.tr.dynamic_scale_period),
-            period=cfg.tr.dynamic_scale_period),
+            period=cfg.tr.dynamic_scale_period)
+        if cfg.tr.use_fp16 else
+        jmp.NoOpLossScale(),
         device_count)
     batch_it = (batch for _ in count()
                 for batch in iter(dataset.dataloader()))
     policy = get_policy(cfg)
     hk.mixed_precision.set_policy(Model, policy)
+    hk.mixed_precision.set_policy(hk.GroupNorm, policy)
     while True:
         batch = policy.cast_to_compute(next(batch_it))
         p_batch = rearrange(batch, '(d b) ... -> d b ...',
