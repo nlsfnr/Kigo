@@ -7,7 +7,10 @@ Haikus.
 Kigo implements a diffusion model using Jax, DM-Haiku, Optax and other tools
 from the DeepMind stack.
 
-![Images of faces](/media/faces.webp)
+<img alt="Images of faces" src="/media/faces.webp" width="100%">
+
+The images above are an uncurated selection of samples generated from a model
+with 200M parameters that was trained on two V100s for about five days.
 
 ## Setup
 
@@ -55,4 +58,4 @@ checkpoint by running e.g. `./cli.py syn zoo/my-model/001000/`.
 This project was implemented using tools from the [DeepMind Jax
 ecosystem](https://www.deepmind.com/blog/using-jax-to-accelerate-our-research).
 
-![Images of sheep](/media/sheep.webp)
+<img alt="Images of sheep" src="/media/sheep.webp" width="100%">
