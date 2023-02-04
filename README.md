@@ -1,11 +1,6 @@
 # Kigo
 
-*Kigo* (Jap., "season word") is a word or phrase associated with a particular
-season, used in traditional forms of Japanese poetry. Kigos commonly occur in
-Haikus.
-
-Kigo implements a diffusion model using Jax, DM-Haiku, Optax and other tools
-from the DeepMind stack.
+Kigo implements a diffusion model using Jax, DM-Haiku and Optax.
 
 <img alt="Images of sheep" src="/media/kigo-sheep.webp" width="100%">
 
