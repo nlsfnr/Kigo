@@ -58,4 +58,4 @@ checkpoint by running e.g. `./cli.py syn zoo/my-model/001000/`.
 This project was implemented using tools from the [DeepMind Jax
 ecosystem](https://www.deepmind.com/blog/using-jax-to-accelerate-our-research).
 
-<img alt="Images of sheep" src="/media/sheep.webp" width="100%">
+<img alt="Images of sheep" src="/media/kigo-sheep.webp" width="100%">
